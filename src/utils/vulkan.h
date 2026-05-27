@@ -1,12 +1,13 @@
 #pragma once
 
+#include <volk.h>
 #include <stdexcept>
 #include <vulkan/vk_enum_string_helper.h>
 
 #define VK_CHECK(expr) \
-    if (VkResult result = (expr); result != VK_SUCCESS) { \
-        std::string str = "Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(result)) + "."; \
-        throw std::exception(str.c_str()); \
+    if ((expr) != VK_SUCCESS) { \
+        std::string str = "Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(expr)) + "."; \
+        throw std::runtime_error(str.c_str()); \
     }
 
 inline bool SupportsApiVersion(uint32_t actual_version, uint32_t requested_version) {
@@ -29,3 +30,55 @@ inline bool SupportsApiVersion(uint32_t actual_version, uint32_t requested_versi
     uint32_t requested_patch = VK_API_VERSION_MINOR(requested_version);
     return actual_patch >= requested_patch;
 }
+
+/////////////////////////////////////////////
+///  ---- TEMPLATE VULKAN STRUCTURES ---- ///
+/////////////////////////////////////////////
+
+//// Component Mappings 
+
+// There is no function of any other component mapping
+constexpr VkComponentMapping COMPONENT_MAPPING_DEFAULT {
+    .r = VK_COMPONENT_SWIZZLE_R,
+    .g = VK_COMPONENT_SWIZZLE_G,
+    .b = VK_COMPONENT_SWIZZLE_B,
+    .a = VK_COMPONENT_SWIZZLE_A,
+};
+
+
+//// Image Subresource Ranges
+
+// Spans one layer and one mipmap of the color section
+constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_DEFAULT {
+    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .baseMipLevel = 0,
+    .levelCount = 1,
+    .baseArrayLayer = 0,
+    .layerCount = 1,
+};
+
+constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_ALL {
+    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .baseMipLevel = 0,
+    .levelCount = VK_REMAINING_MIP_LEVELS,
+    .baseArrayLayer = 0,
+    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+};
+
+constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_DEPTH {
+    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+    .baseMipLevel = 0,
+    .levelCount = 1,
+    .baseArrayLayer = 0,
+    .layerCount = 1,
+};
+
+
+//// Image Subresource Layers
+
+constexpr VkImageSubresourceLayers IMAGE_SUBRESOURCE_LAYERS_DEFAULT {
+    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .mipLevel = 0,
+    .baseArrayLayer = 0,
+    .layerCount = 1,
+};

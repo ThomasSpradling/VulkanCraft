@@ -2,7 +2,7 @@
 
 #include "GLFW/glfw3.h"
 #include "vulkan_renderer.h"
-#include "utils/vulkan.h"
+#include <memory>
 
 /**
  * @brief Manages the program as a software-level application. This includes
@@ -20,7 +20,5 @@ public:
     void Run();
 private:
     GLFWwindow *m_window;
-    VulkanRenderer m_vulkan_renderer;
-
-    bool m_fatal_error = false;
+    std::unique_ptr<VulkanRenderer> m_vulkan_renderer;
 };

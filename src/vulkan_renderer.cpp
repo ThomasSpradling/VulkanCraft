@@ -655,7 +655,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
         std::vector<VkPresentModeKHR> present_modes(present_modes_count);
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface, &present_modes_count, present_modes.data()));
     
-        if (m_props.enable_vsync) {
+        // if (m_props.enable_vsync) {
             for (const auto &mode : present_modes) {
                 if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
                     present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
@@ -666,7 +666,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
                     present_mode = VK_PRESENT_MODE_FIFO_KHR;
                 }
             }
-        }
+        // }
     }
 
     // Choose extent
@@ -743,28 +743,9 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
 
     m_swapchain_images.resize(image_count);
     VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapchain, &image_count, m_swapchain_images.data()));
-
-    m_swapchain_image_views.resize(image_count);
-
-    for (int i = 0; i < m_swapchain_images.size(); ++i) {
-        VkImageViewCreateInfo image_view_create_info {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext = nullptr,
-            .image = m_swapchain_images[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = swapchain_format.format,
-            .components = COMPONENT_MAPPING_DEFAULT,
-            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT
-        };
-
-        vkCreateImageView(m_device, &image_view_create_info, nullptr, &m_swapchain_image_views[i]);
-    }
 }
 
 void VulkanRenderer::DestroySwapChain() {
-    for (int i = 0; i < m_swapchain_images.size(); ++i) {
-        vkDestroyImageView(m_device, m_swapchain_image_views[i], nullptr);
-    }
     vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
 
     std::cout << " - Destroyed swap chain.\n";
@@ -864,6 +845,7 @@ void VulkanRenderer::ResizeSwapChain() {
     m_swapchain_resize_requested = false;
 
     DestroyFrameData();
+    // DestroySwapChain();
     CreateSwapChain(m_props.window_extent);
     InitFrameData();
     m_current_frame_index = 0;

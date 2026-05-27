@@ -92,7 +92,6 @@ private:
     VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
     VkExtent2D m_swapchain_extent;
     std::vector<VkImage> m_swapchain_images;
-    std::vector<VkImageView> m_swapchain_image_views;
 
     bool m_swapchain_resize_requested = false;
 

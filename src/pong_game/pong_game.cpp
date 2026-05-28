@@ -1,6 +1,8 @@
 #include "../utils/vulkan.h"
 
+#include "../backend/resource_manager/text_resource.h"
 #include "../events/window_events/key_events.h"
+#include "../backend/resource_manager/resource_handle.h"
 #include "../events/window_events/mouse_events.h"
 #include "../events/event_dispatcher.h"
 #include "pong_game.h"
@@ -9,6 +11,10 @@
 void PongGame::Initialize() {
     std::cout << "Game initialized!" << std::endl;
     m_event_handler->AddListener(this);
+
+    auto text_handle = m_resource_manager->Load<TextResource>("hello_world");
+
+    // std::cout << text_handle.Get()->Contents() << std::endl;
 }
 
 void PongGame::ShutDown() {
@@ -17,7 +23,8 @@ void PongGame::ShutDown() {
 }
 
 void PongGame::Update(float delta_time) {
-
+    auto *text = m_resource_manager->GetResource<TextResource>("hello_world");
+    std::cout << text->Contents() << std::endl;
 }
 
 void PongGame::Render(const Frame &frame, float delta_time) {
@@ -58,4 +65,12 @@ void PongGame::OnEvent(const Event &event) {
         glm::vec2 color = (e.GetMousePosition() / screen_size);
         m_clear_color = { color.r, color.g, 0.0f, 0.0f };
     });
+}
+
+void PongGame::InitPipelines() {
+
+}
+
+void PongGame::DestroyPipelines() {
+
 }

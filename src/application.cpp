@@ -47,9 +47,10 @@ Application::Application(std::shared_ptr<Game> game)
     m_vulkan_renderer->Properties().window_extent = { width, height };
     m_vulkan_renderer->Initialize();
 
+    m_resource_manager = std::make_shared<ResourceManager>();
     m_event_handler = std::make_shared<EventHandler>();
 
-    m_game->SetUp(this, m_event_handler);
+    m_game->SetUp(this, m_event_handler, m_resource_manager);
 }
 
 Application::~Application() {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "backend/resource_manager/resource_manager.h"
 #include "events/event_handler.h"
 #include "events/window_events/key_events.h"
 #include "game.h"
@@ -31,6 +32,7 @@ private:
     };
 private:
     std::shared_ptr<EventHandler> m_event_handler = nullptr;
+    std::shared_ptr<ResourceManager> m_resource_manager = nullptr;
     std::shared_ptr<Game> m_game = nullptr;
 
     GLFWwindow *m_window;

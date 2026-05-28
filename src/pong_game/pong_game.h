@@ -14,4 +14,7 @@ private:
     float m_money = 0.0f;
     bool m_claimed_prize = false;
     VkClearColorValue m_clear_color = { 164.0f/256.0f, 30.0f/256.0f, 34.0f/256.0f, 0.0f };
+private:
+    void InitPipelines();
+    void DestroyPipelines();
 };

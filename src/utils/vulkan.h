@@ -1,13 +1,13 @@
 #pragma once
 
 #include <volk.h>
-#include <stdexcept>
+#include <iostream>
 #include <vulkan/vk_enum_string_helper.h>
 
 #define VK_CHECK(expr) \
     if ((expr) != VK_SUCCESS) { \
         std::string str = "Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(expr)) + "."; \
-        throw std::runtime_error(str.c_str()); \
+        std::cerr << str << "\n"; \
     }
 
 inline bool SupportsApiVersion(uint32_t actual_version, uint32_t requested_version) {

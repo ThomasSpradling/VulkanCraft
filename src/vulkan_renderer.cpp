@@ -1,4 +1,6 @@
+#include <array>
 #include <format>
+#include <fstream>
 #include <stdexcept>
 #include <volk.h>
 
@@ -7,7 +9,6 @@
 #include <vector>
 #include "utils/vulkan.h"
 #include "utils/errors.h"
-#include "vulkan/vulkan_core.h"
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
@@ -30,8 +31,6 @@ void VulkanRenderer::Initialize() {
 }
 
 void VulkanRenderer::ShutDown() {
-    vkDeviceWaitIdle(m_device);
-
     DestroyFrameData();
     DestroySwapChain();
     DestroyVulkanDevice();
@@ -110,7 +109,7 @@ void VulkanRenderer::EndFrame() {
             .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
             .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .image = current_frame.draw_image,
             .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT,
@@ -239,6 +238,61 @@ void VulkanRenderer::EndFrame() {
     }
 
     m_current_frame_index = (m_current_frame_index + 1) % m_swapchain_images.size();
+}
+
+void VulkanRenderer::ImmediateSubmit(std::function<void(VkCommandBuffer)> &&callback) const {
+    // TODO: Support other queue types
+
+    VK_CHECK(vkResetFences(m_device, 1, &m_graphics_fence));
+    VK_CHECK(vkResetCommandBuffer(m_graphics_command_buffer, 0));
+
+    VkCommandBufferBeginInfo begin_info {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    VK_CHECK(vkBeginCommandBuffer(m_graphics_command_buffer, &begin_info));
+    callback(m_graphics_command_buffer);
+    VK_CHECK(vkEndCommandBuffer(m_graphics_command_buffer));
+
+    VkSubmitInfo submit_info {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &m_graphics_command_buffer,
+    };
+    VK_CHECK(vkQueueSubmit(m_graphics_queue, 1, &submit_info, m_graphics_fence));
+    VK_CHECK(vkWaitForFences(m_device, 1, &m_graphics_fence, VK_TRUE, 1'000'000'000));
+}
+
+VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) {
+    std::ifstream file(file_path, std::ios::ate | std::ios::binary);
+    if (!file.is_open())
+        std::cerr << "Failed to load shader at path '" << file_path << "'.\n";
+
+    size_t file_size = static_cast<size_t>(file.tellg());
+
+    std::cout << "FILE PATH: " << file_path << "\n";
+    std::cout << "FILE SIZE: " << file_size << "\n";
+    if (file_size % 4 != 0)
+        std::cerr << "Shadeer file not byte-aligned. Are you shure this is in SPIR-V format?\n";
+
+    std::vector<char> source_buffer(file_size);
+
+    file.seekg(0);
+    file.read(source_buffer.data(), file_size);
+    file.close();
+    
+    VkShaderModuleCreateInfo create_info {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext = nullptr,
+        .codeSize = source_buffer.size(),
+        .pCode = reinterpret_cast<const uint32_t *>(source_buffer.data())
+    };
+    
+    VkShaderModule shader_module;
+    vkCreateShaderModule(m_device, &create_info, nullptr, &shader_module);
+    return shader_module;
 }
 
 ///////////////////////
@@ -605,9 +659,65 @@ void VulkanRenderer::InitVulkanDevice() {
     if (m_image_formats.hdr == VK_FORMAT_UNDEFINED)
         std::cerr << "Cannot find valid hdr format!\n";
     // TODO: Default to color attachment
+
+    //// Create immediate command buffers and command pools ////
+    {
+        VkCommandPoolCreateInfo create_info {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = m_graphics_queue_family,
+        };
+        VK_CHECK(vkCreateCommandPool(m_device, &create_info, nullptr, &m_graphics_command_pool));
+    
+        VkCommandBufferAllocateInfo command_buffer_allocate_info {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .commandPool = m_graphics_command_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+        VK_CHECK(vkAllocateCommandBuffers(m_device, &command_buffer_allocate_info, &m_graphics_command_buffer));
+    }
+
+    VkFenceCreateInfo fence_create_info {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
+    VK_CHECK(vkCreateFence(m_device, &fence_create_info, nullptr, &m_graphics_fence));
+
+    //// Create Descriptor Pool ////
+    {
+        // TODO: Use more sophisticated way of getting the descriptor pool sizes
+        std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> sizes{};
+        sizes.fill(1024);
+        std::vector<VkDescriptorPoolSize> pool_sizes;
+        for (size_t i = 0; i < sizes.size(); ++i) {
+            if (sizes[i] > 0) {
+                pool_sizes.push_back({ static_cast<VkDescriptorType>(i), sizes[i] });
+            }
+        }
+
+        VkDescriptorPoolCreateInfo create_info {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = DESCRIPTOR_POOL_MAX_SETS,
+            .poolSizeCount = sizes.size(),
+            .pPoolSizes = pool_sizes.data(),
+        };
+        VK_CHECK(vkCreateDescriptorPool(m_device, &create_info, nullptr, &m_descriptor_pool));
+    }
 }
 
 void VulkanRenderer::DestroyVulkanDevice() {
+    vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
+
+    vkDestroyFence(m_device, m_graphics_fence, nullptr);
+
+    vkFreeCommandBuffers(m_device, m_graphics_command_pool, 1, &m_graphics_command_buffer);
+    vkDestroyCommandPool(m_device, m_graphics_command_pool, nullptr);
+
     vmaDestroyAllocator(m_allocator);
     vkDestroyDevice(m_device, nullptr);
 

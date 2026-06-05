@@ -1,12 +1,18 @@
 #pragma once
 
+#include "utils/vulkan.h"
+
 #include <GLFW/glfw3.h>
 #include <cstdint>
 
+#include <functional>
 #include <limits>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include <vk_mem_alloc.h>
+
 
 struct RenderProperties {
     const uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
@@ -51,9 +57,68 @@ public:
 
     // Signals completion of this frame so that a future frame may begin.
     void EndFrame();
+    uint32_t GetCurrentFrameIndex() const { return m_current_frame_index; }
+
+    void ImmediateSubmit(std::function<void(VkCommandBuffer)> &&callback) const;
+
+    VkDevice GetDevice() const { return m_device; }
+    VmaAllocator GetMemoryAllocator() const { return m_allocator; }
+    VkDescriptorPool GetDescriptorPool() const { return m_descriptor_pool; }
+
+    VkShaderModule LoadShader(const std::string &file_path);
+
+    size_t SwapChainImageCount() const { return m_swapchain_images.size(); }
+
+    // Formats
+    VkFormat GetColorFormat() { return m_image_formats.color; }
+    // VkFormat GetDepthStencilFormat() { return m_image_formats.depth; }
+
+    // Loads the data into a buffer that has already been allocated. Offsets and sizes are represented in bytes.
+    template <typename T>
+    void LoadBufferData(VkBuffer buffer, std::vector<T> data, size_t buffer_offset = 0, size_t data_offset = 0, size_t size = 0) {
+        const size_t buffer_size = size == 0 ? sizeof(T) * data.size() : size;
+        
+        if (buffer == VK_NULL_HANDLE)
+            throw std::runtime_error("Cannot load data into a null buffer.");
+
+        // Create staging buffer
+        VkBuffer staging_buffer;
+        VmaAllocation staging_buffer_alloc;
+        VmaAllocationInfo staging_allocation_info;
+        {
+            VkBufferCreateInfo buffer_create_info {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .size = buffer_size,
+                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            };
+            VmaAllocationCreateInfo allocation_create_info {
+                .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+                .usage = VMA_MEMORY_USAGE_AUTO,
+            };
+
+            VK_CHECK(vmaCreateBuffer(m_allocator, &buffer_create_info, &allocation_create_info, &staging_buffer, &staging_buffer_alloc, &staging_allocation_info));
+        }
+
+        // Copy raw data into staging buffer
+        std::memcpy(staging_allocation_info.pMappedData, data.data(), buffer_size);
+
+        ImmediateSubmit([&](VkCommandBuffer cmd) {
+            VkBufferCopy copy_region {
+                .srcOffset = data_offset,
+                .dstOffset = buffer_offset,
+                .size = buffer_size,
+            };
+            vkCmdCopyBuffer(cmd, staging_buffer, buffer, 1, &copy_region);
+        });
+
+        vmaDestroyBuffer(m_allocator, staging_buffer, staging_buffer_alloc);
+    }
 private:
     struct ImageFormats {
         VkFormat color;
+        VkFormat depth;
         VkFormat hdr;
     };
 
@@ -70,6 +135,8 @@ private:
         VkImageView draw_image_view;
         VmaAllocation draw_image_allocation;
     };
+
+    const uint32_t DESCRIPTOR_POOL_MAX_SETS = 2048;
 private:
     RenderProperties m_props;
 
@@ -85,6 +152,11 @@ private:
     uint32_t m_graphics_queue_family = std::numeric_limits<uint32_t>::max();
     VkQueue m_graphics_queue = VK_NULL_HANDLE;
 
+    // Immediate command buffer and pool
+    VkCommandPool m_graphics_command_pool = VK_NULL_HANDLE;
+    VkCommandBuffer m_graphics_command_buffer = VK_NULL_HANDLE;
+    VkFence m_graphics_fence = VK_NULL_HANDLE;
+
     VmaAllocator m_allocator = VK_NULL_HANDLE;
 
     ImageFormats m_image_formats;
@@ -99,6 +171,8 @@ private:
 
     std::vector<PerFrameData> m_frame_data;
     uint32_t m_current_frame_index = 0; // Current frame in flight
+
+    VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;
 private:
     void InitVulkanInstance();
     void DestroyVulkanInstance();

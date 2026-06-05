@@ -1,6 +1,5 @@
 #pragma once
 
-#include "backend/resource_manager/resource_manager.h"
 #include "events/event_handler.h"
 #include "events/window_events/key_events.h"
 #include "game.h"
@@ -32,14 +31,13 @@ private:
     };
 private:
     std::shared_ptr<EventHandler> m_event_handler = nullptr;
-    std::shared_ptr<ResourceManager> m_resource_manager = nullptr;
     std::shared_ptr<Game> m_game = nullptr;
 
     GLFWwindow *m_window;
 
     std::shared_ptr<VulkanRenderer> m_vulkan_renderer;
 
-    static constexpr int UPDATE_RATE = 20; // Hz
+    static constexpr int UPDATE_RATE = 120; // Hz
     std::optional<uint32_t> m_target_fps = std::nullopt; // If nullopt, then uncapped FPS
     uint32_t m_fps = 0;
 

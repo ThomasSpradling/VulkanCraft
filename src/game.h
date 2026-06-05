@@ -1,17 +1,16 @@
 #pragma once
 
 #include "events/event_handler.h"
-#include "backend/resource_manager/resource_manager.h"
 class Application;
 #include "vulkan_renderer.h"
 class Game {
 public:
     Game() {}
 
-    void SetUp(Application *application, std::shared_ptr<EventHandler> event_handler, std::shared_ptr<ResourceManager> resource_manager) {
+    void SetUp(Application *application, std::shared_ptr<EventHandler> event_handler, std::shared_ptr<VulkanRenderer> renderer) {
         m_application = application;
         m_event_handler = event_handler;
-        m_resource_manager = resource_manager;
+        m_renderer = renderer;
         // m_application->GetWindowSize();
     }
 
@@ -26,5 +25,5 @@ public:
 protected:
     Application *m_application;
     std::shared_ptr<EventHandler> m_event_handler;
-    std::shared_ptr<ResourceManager> m_resource_manager;
+    std::shared_ptr<VulkanRenderer> m_renderer;
 };

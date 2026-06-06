@@ -3,6 +3,7 @@
 #include <volk.h>
 #include <iostream>
 #include <vulkan/vk_enum_string_helper.h>
+#include <vulkan/vulkan_core.h>
 
 #define VK_CHECK(expr) \
     if ((expr) != VK_SUCCESS) { \
@@ -31,6 +32,12 @@ inline bool SupportsApiVersion(uint32_t actual_version, uint32_t requested_versi
     return actual_patch >= requested_patch;
 }
 
+
+//////////////////////////////////
+///  ---- VULKAN COMMANDS ---- ///
+//////////////////////////////////
+
+void TransitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageSubresourceRange subresource_range, VkImageLayout old_layout, VkImageLayout new_layout);
 /////////////////////////////////////////////
 ///  ---- TEMPLATE VULKAN STRUCTURES ---- ///
 /////////////////////////////////////////////
@@ -56,6 +63,8 @@ constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_DEFAULT {
     .baseArrayLayer = 0,
     .layerCount = 1,
 };
+
+constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_COLOR = IMAGE_SUBRESOURCE_RANGE_DEFAULT;
 
 constexpr VkImageSubresourceRange IMAGE_SUBRESOURCE_RANGE_ALL {
     .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,

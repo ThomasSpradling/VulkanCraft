@@ -1,16 +1,16 @@
-#include "events/window_events/mouse_events.h"
-#include "utils/vulkan.h"
+#include "Events/WindowEvents/mouse_events.h"
+#include "Graphics/utils.h"
 
 #include "application.h"
 #include "vulkan/vulkan_core.h"
-#include "vulkan_renderer.h"
+#include "Graphics/vulkan_renderer.h"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <thread>
-#include "utils/errors.h"
+#include "errors.h"
 
 Application::Application(std::shared_ptr<Game> game)
     : m_game(game)
@@ -130,12 +130,11 @@ glm::ivec2 Application::GetWindowSize() {
 }
 
 void Application::Render(float delta_time) {
+    auto frame = m_vulkan_renderer->BeginFrame();
+    m_game->Render(frame, delta_time);
 
-    if (auto frame = m_vulkan_renderer->BeginFrame(); frame) {
-        m_game->Render(*frame, delta_time);
-
+    if (frame)
         m_vulkan_renderer->EndFrame();
-    }
 }
 
 void Application::Update(float delta_time) {

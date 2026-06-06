@@ -1,8 +1,8 @@
 #pragma once
 
-#include "events/event_handler.h"
+#include "Events/event_handler.h"
 class Application;
-#include "vulkan_renderer.h"
+#include "Graphics/vulkan_renderer.h"
 class Game {
 public:
     Game() {}
@@ -21,7 +21,7 @@ public:
     virtual void Update(float delta_time) = 0;
 
     // Handles one graphical frame of rendering
-    virtual void Render(const Frame &frame, float delta_time) = 0;
+    virtual void Render(std::optional<Frame> frame, float delta_time) = 0;
 protected:
     Application *m_application;
     std::shared_ptr<EventHandler> m_event_handler;

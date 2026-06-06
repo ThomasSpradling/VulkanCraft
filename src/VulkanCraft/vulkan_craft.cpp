@@ -1,20 +1,25 @@
-#include "../utils/vulkan.h"
+#include "../Graphics/utils.h"
 
 // #include "../backend/resource_manager/text_resource.h"
-#include "../events/window_events/key_events.h"
-#include "../events/window_events/mouse_events.h"
-#include "../events/event_dispatcher.h"
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/transform.hpp>
 
-#include "../backend/pipeline_builder.h"
-#include "vulkan/vulkan_core.h"
-#include "pong_game.h"
+#include "../Events/WindowEvents/key_events.h"
+#include "../Events/WindowEvents/mouse_events.h"
+#include "../Events/event_dispatcher.h"
+
+#include "../Graphics/pipeline_builder.h"
+#include <vulkan/vulkan_core.h>
+#include "vulkan_craft.h"
 #include <iostream>
 #include <vector>
 
-void PongGame::Initialize() {
+void VulkanCraft::Initialize() {
     std::cout << "Game initialized!" << std::endl;
     m_event_handler->AddListener(this);
 
+    m_frame_data.resize(m_renderer->SwapChainImageCount());
+    InitRenderTargets();
     InitPipelines();
     InitGeometry();
 
@@ -23,102 +28,137 @@ void PongGame::Initialize() {
     // std::cout << text_handle.Get()->Contents() << std::endl;
 }
 
-void PongGame::ShutDown() {
+void VulkanCraft::ShutDown() {
     std::cout << "Game shutting down!" << std::endl;
     m_event_handler->RemoveListener(this);
 
     DestroyGeometry();
     DestroyPipelines();
+    DestroyRenderTargets();
 }
 
-void PongGame::Update(float delta_time) {
+void VulkanCraft::Update(float delta_time) {
     // auto *text = m_resource_manager->GetResource<TextResource>("hello_world");
     // std::cout << text->Contents() << std::endl;
 
+    static float time = 0.0f;
+    time += delta_time * 0.0005f;
 
+    const auto extent = m_renderer->DrawExtent();
+
+    float aspect =
+        static_cast<float>(extent.width) /
+        static_cast<float>(extent.height);
+
+    glm::mat4 view = glm::translate(
+        glm::mat4(1.0f),
+        glm::vec3(0.0f, 0.0f, -5.0f)
+    );
+
+    glm::mat4 projection = glm::perspective(
+        glm::radians(60.0f),
+        aspect,
+        0.1f,
+        100.0f
+    );
+    projection[1][1] *= -1.0f;
+
+    glm::vec3 spin_axis = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
+    glm::mat4 model = glm::rotate(
+        glm::mat4(1.0f),
+        time * glm::radians(90.0f),
+        glm::vec3(1.0f, 1.0f, 0.5f)
+    );
+
+    m_push_constants.view_projection = projection * view * model;
 }
 
-void PongGame::Render(const Frame &frame, float delta_time) {
+void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
     uint32_t i = m_renderer->GetCurrentFrameIndex();
+
+    if (!frame.has_value()) {
+        m_frame_data.resize(m_renderer->SwapChainImageCount());
+        // Window has been resized or modified
+        DestroyRenderTargets();
+        InitRenderTargets();
+        return;
+    }
+
     UpdateUniforms();
 
-    // Transition to VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-    {
-        VkImageMemoryBarrier2 draw_image_barrier {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext = nullptr,
-            .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = frame.image,
-            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT,
-        };
-        
-        VkDependencyInfo dependency_info {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext = nullptr,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &draw_image_barrier,
-        };
-
-        vkCmdPipelineBarrier2(frame.cmd, &dependency_info);
-    }
+    TransitionImageLayout(frame->cmd, frame->image, IMAGE_SUBRESOURCE_RANGE_COLOR, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    TransitionImageLayout(frame->cmd, m_frame_data[i].depth_image, IMAGE_SUBRESOURCE_RANGE_DEPTH, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     VkRenderingAttachmentInfo color_attachment {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .pNext = nullptr,
-        .imageView = frame.image_view,
+        .imageView = frame->image_view,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    };
+    VkRenderingAttachmentInfo depth_attachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .pNext = nullptr,
+        .imageView = m_frame_data[i].depth_image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = {.depthStencil = { 1.0f, 0 }}
     };
     VkRenderingInfo rendering_info {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = {
             .offset = { 0, 0 },
-            .extent = frame.extent,
+            .extent = frame->extent,
         },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment,
+        .pDepthAttachment = &depth_attachment,
     };
-    vkCmdBeginRendering(frame.cmd, &rendering_info);
+    vkCmdBeginRendering(frame->cmd, &rendering_info);
     // Draw commands
     {
         
         VkViewport viewport {
             .x = 0.0f,
             .y = 0.0f,
-            .width = static_cast<float>(frame.extent.width),
-            .height = static_cast<float>(frame.extent.height),
+            .width = static_cast<float>(frame->extent.width),
+            .height = static_cast<float>(frame->extent.height),
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
         };
-        vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
+        vkCmdSetViewport(frame->cmd, 0, 1, &viewport);
     
         VkRect2D scissors {
             .offset = { 0, 0 },
-            .extent = frame.extent
+            .extent = frame->extent
         };
-        vkCmdSetScissor(frame.cmd, 0, 1, &scissors);
+        vkCmdSetScissor(frame->cmd, 0, 1, &scissors);
     
         // Bind graphics and draw
-        vkCmdBindPipeline(frame.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline);
-        vkCmdBindDescriptorSets(frame.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline_layout, 0, 1, &m_frame_data[i].view_descriptor_set, 0, nullptr);
+        vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline);
+        vkCmdBindDescriptorSets(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline_layout, 0, 1, &m_frame_data[i].view_descriptor_set, 0, nullptr);
+        vkCmdPushConstants(frame->cmd, m_triangle_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &m_push_constants);
 
         VkDeviceSize offsets[] = { 0 };
-        vkCmdBindVertexBuffers(frame.cmd, 0, 1, &m_vertex_buffer, offsets);
-        vkCmdBindIndexBuffer(frame.cmd, m_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        // vkCmdDraw(frame.cmd, 3, 1, 0, 0);
-        vkCmdDrawIndexed(frame.cmd, 6, 1, 0, 0, 0);
+
+        for (auto &mesh : m_model->GetMeshes()) {
+            vkCmdBindVertexBuffers(frame->cmd, 0, 1, &mesh->mesh_buffers.vertex_buffer, offsets);
+            vkCmdBindIndexBuffer(frame->cmd, mesh->mesh_buffers.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            
+            for (auto &primitive : mesh->primitives) {
+                vkCmdDrawIndexed(frame->cmd, primitive.index_count, 1, primitive.start_index, 0, 0);
+            }
+        }
+
+        // vkCmdDraw(frame->cmd, 3, 1, 0, 0);
     }
-    vkCmdEndRendering(frame.cmd);
+    vkCmdEndRendering(frame->cmd);
 }
 
-void PongGame::OnEvent(const Event &event) {
+void VulkanCraft::OnEvent(const Event &event) {
     EventDispatcher dispatcher(event);
 
     dispatcher.Dispatch<MouseMovedEvent>([this](const MouseMovedEvent &e) {
@@ -128,66 +168,63 @@ void PongGame::OnEvent(const Event &event) {
     });
 }
 
-void PongGame::InitGeometry() {
-    // Create raw vertex data
-    std::vector<Vertex> vertices {
-               // positions              // colors
-        Vertex{glm::vec2(-0.8f, -0.8f),  glm::vec3(1.0f, 0.0f, 0.0f)},
-        Vertex{glm::vec2( 0.8f, -0.8f),  glm::vec3(0.0f, 1.0f, 0.0f)},
-        Vertex{glm::vec2( 0.8f,  0.8f),  glm::vec3(0.0f, 0.0f, 1.0f)},
-        Vertex{glm::vec2(-0.8f,  0.8f),  glm::vec3(1.0f, 1.0f, 1.0f)},
-        // Vertex{glm::vec2( 0.8f,  0.8f),  glm::vec3(0.0f, 0.0f, 1.0f)},
-    };
+void VulkanCraft::InitRenderTargets() {
+    // Depth Buffer
 
-    std::vector<uint32_t> indices {
-        0, 1, 3,
-        1, 2, 3
-    };
-
-    // Create vertex buffer
-    {
-        VkBufferCreateInfo buffer_create_info {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .size = vertices.size() * sizeof(Vertex),
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
+    for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
+        VkImageCreateInfo image_create_info {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = m_renderer->GetDepthOnlyFormat(),
+            .extent = {
+                .width = m_renderer->DrawExtent().width,
+                .height = m_renderer->DrawExtent().height,
+                .depth = 1,
+            },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
         VmaAllocationCreateInfo allocation_create_info {
             .flags = 0,
             .usage = VMA_MEMORY_USAGE_AUTO,
         };
-        VK_CHECK(vmaCreateBuffer(m_renderer->GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &m_vertex_buffer, &m_vertex_buffer_alloc, nullptr));
-        m_renderer->LoadBufferData(m_vertex_buffer, vertices);
-    }
+        VK_CHECK(vmaCreateImage(m_renderer->GetMemoryAllocator(), &image_create_info, &allocation_create_info, &m_frame_data[i].depth_image, &m_frame_data[i].depth_image_alloc, nullptr));
     
-    // Create index buffer
-    {
-        VkBufferCreateInfo buffer_create_info {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .size = indices.size() * sizeof(uint32_t),
-            .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        VkImageViewCreateInfo image_view_create_info {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = m_frame_data[i].depth_image,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = m_renderer->GetDepthOnlyFormat(),
+            .components = COMPONENT_MAPPING_DEFAULT,
+            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEPTH,
         };
-        VmaAllocationCreateInfo allocation_create_info {
-            .flags = 0,
-            .usage = VMA_MEMORY_USAGE_AUTO,
-        };
-        VK_CHECK(vmaCreateBuffer(m_renderer->GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &m_index_buffer, &m_index_buffer_alloc, nullptr));
-        m_renderer->LoadBufferData(m_index_buffer, indices);
+        VK_CHECK(vkCreateImageView(m_renderer->GetDevice(), &image_view_create_info, nullptr, &m_frame_data[i].depth_image_view));
     }
 }
 
-void PongGame::DestroyGeometry() {
-    vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_vertex_buffer, m_vertex_buffer_alloc);
-    vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_index_buffer, m_index_buffer_alloc);
+void VulkanCraft::DestroyRenderTargets() {
+    for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
+        vkDestroyImageView(m_renderer->GetDevice(), m_frame_data[i].depth_image_view, nullptr);
+        vmaDestroyImage(m_renderer->GetMemoryAllocator(), m_frame_data[i].depth_image, m_frame_data[i].depth_image_alloc);
+    }
 }
 
-void PongGame::InitPipelines() {
-    const uint32_t SWAPCHAIN_COUNT = m_renderer->SwapChainImageCount();
-    m_frame_data.resize(SWAPCHAIN_COUNT);
+void VulkanCraft::InitGeometry() {
+    m_model = std::make_shared<GLTFModel>(*m_renderer, RESOURCE_PATH "/models/Cube/Cube.gltf");
+}
 
+void VulkanCraft::DestroyGeometry() {
+    // m_renderer->DestroyGPUMesh(m_mesh);
+    m_model->CleanUp();
+}
+
+void VulkanCraft::InitPipelines() {
     // Create uniform buffers for view-projection matrix
     {
         const uint32_t VIEW_BINDING = 0;
@@ -207,7 +244,7 @@ void PongGame::InitPipelines() {
         };
         VK_CHECK(vkCreateDescriptorSetLayout(m_renderer->GetDevice(), &create_info, nullptr, &m_view_uniform_layout));
         
-        for (uint32_t i = 0; i < SWAPCHAIN_COUNT; ++i) {
+        for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
             // Allocate descriptor set
             VkDescriptorSetAllocateInfo allocate_info {
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -250,15 +287,22 @@ void PongGame::InitPipelines() {
             vkUpdateDescriptorSets(m_renderer->GetDevice(), 1, &write_descriptor_set, 0, nullptr);
         }
     }
+    
+    VkPushConstantRange push_constant_data {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(PushConstantData),
+    };
 
-
-    VkShaderModule vertex_shader_module = m_renderer->LoadShader(RESOURCE_PATH "shaders/triangle.vert.spv");
-    VkShaderModule fragment_shader_module = m_renderer->LoadShader(RESOURCE_PATH "shaders/triangle.frag.spv");
+    VkShaderModule vertex_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/triangle.vert.spv");
+    VkShaderModule fragment_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/triangle.frag.spv");
 
     std::vector<VkDescriptorSetLayout> descriptor_set_layouts {
         m_view_uniform_layout
     };
-    std::vector<VkPushConstantRange> push_constant_ranges {};
+    std::vector<VkPushConstantRange> push_constant_ranges {
+        push_constant_data
+    };
 
     VkPipelineLayoutCreateInfo pipeline_layout_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -272,12 +316,16 @@ void PongGame::InitPipelines() {
     VK_CHECK(vkCreatePipelineLayout(m_renderer->GetDevice(), &pipeline_layout_create_info, nullptr, &m_triangle_pipeline_layout))
 
     m_triangle_pipeline = PipelineBuilder_Graphics(m_renderer->GetDevice(), m_triangle_pipeline_layout)
-        .AddBinding(0, sizeof(Vertex))
-        .AddAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, pos))
-        .AddAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color))
+        .AddBinding(0, sizeof(MeshVertex))
+        .AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position))
+        .AddAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal))
+        .AddAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color))
+        .AddAttribute(3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv))
     
         .AddColorAttachmentFormat(m_renderer->GetColorFormat())
-        // .SetDepthAttachmentFormat(m_renderer->GetDepthStencilFormat())
+        .SetDepthAttachmentFormat(m_renderer->GetDepthOnlyFormat())
+        .EnableDepthTest()
+        
         .AddShaderStage(VK_SHADER_STAGE_VERTEX_BIT, vertex_shader_module)
         .AddShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, fragment_shader_module)
         .Build();
@@ -286,19 +334,18 @@ void PongGame::InitPipelines() {
     vkDestroyShaderModule(m_renderer->GetDevice(), fragment_shader_module, nullptr);
 }
 
-void PongGame::DestroyPipelines() {
+void VulkanCraft::DestroyPipelines() {
     vkDestroyPipeline(m_renderer->GetDevice(), m_triangle_pipeline, nullptr);
     vkDestroyPipelineLayout(m_renderer->GetDevice(), m_triangle_pipeline_layout, nullptr);
 
-    const uint32_t SWAPCHAIN_COUNT = m_renderer->SwapChainImageCount();
-    for (uint32_t i = 0; i < SWAPCHAIN_COUNT; ++i) {
+    for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
         vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_frame_data[i].view_uniform_buffer, m_frame_data[i].view_uniform_allocation);
         vkFreeDescriptorSets(m_renderer->GetDevice(), m_renderer->GetDescriptorPool(), 1, &m_frame_data[i].view_descriptor_set);
     }
     vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_view_uniform_layout, nullptr);
 }
 
-void PongGame::UpdateUniforms() {
+void VulkanCraft::UpdateUniforms() {
     uint32_t i = m_renderer->GetCurrentFrameIndex();
 
     // Map GPU memory onto CPU and edit it

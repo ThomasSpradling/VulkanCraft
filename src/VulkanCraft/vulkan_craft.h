@@ -1,31 +1,36 @@
 #pragma once
 // #include "../game.h"
 #include "../application.h"
-#include "../events/event_listener.h"
+#include "../Events/event_listener.h"
+#include "../Graphics/mesh.h"
 #include <glm/glm.hpp>
 #include <vector>
-
-struct Vertex {
-    glm::vec2 pos;
-    glm::vec3 color;
-};
+#include "../Graphics/gltf_model.h"
 
 struct UniformData {
     glm::vec3 color;
 };
 
-class PongGame : public Game, public EventListener {
+class VulkanCraft : public Game, public EventListener {
 public:
     virtual void Initialize() override;
     virtual void ShutDown() override;
     virtual void Update(float delta_time) override;
-    virtual void Render(const Frame &frame, float delta_time) override;
+    virtual void Render(std::optional<Frame> frame, float delta_time) override;
     virtual void OnEvent(const Event &event) override;
 private:
     struct PerFrameData {
         VkDescriptorSet view_descriptor_set = VK_NULL_HANDLE;
         VkBuffer view_uniform_buffer = VK_NULL_HANDLE;
         VmaAllocation view_uniform_allocation = VK_NULL_HANDLE;
+
+        VkImage depth_image;
+        VkImageView depth_image_view;
+        VmaAllocation depth_image_alloc;
+    };
+
+    struct PushConstantData {
+        glm::mat4 view_projection;
     };
 private:
     float m_money = 0.0f;
@@ -35,18 +40,20 @@ private:
     VkPipelineLayout m_triangle_pipeline_layout = VK_NULL_HANDLE;
     VkPipeline m_triangle_pipeline = VK_NULL_HANDLE;
 
-    VkBuffer m_vertex_buffer = VK_NULL_HANDLE;
-    VmaAllocation m_vertex_buffer_alloc = VK_NULL_HANDLE;
-
-    VkBuffer m_index_buffer = VK_NULL_HANDLE;
-    VmaAllocation m_index_buffer_alloc = VK_NULL_HANDLE;
+    // GPUMesh m_mesh;
+    std::shared_ptr<GLTFModel> m_model;
 
     VkDescriptorSetLayout m_view_uniform_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_model_uniform_layout = VK_NULL_HANDLE;
 
+    PushConstantData m_push_constants;
+
     std::vector<PerFrameData> m_frame_data;
     UniformData m_uniform_data;
 private:
+    void InitRenderTargets();
+    void DestroyRenderTargets();
+
     void InitGeometry();
     void DestroyGeometry();
 

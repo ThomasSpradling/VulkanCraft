@@ -5,12 +5,12 @@
 #include <memory>
 #include <stdexcept>
 
-#include "pong_game/pong_game.h"
+#include "VulkanCraft/vulkan_craft.h"
 
 int main(int argc, char *argv[]) {
     try {
         // ConsoleGame game;
-        std::shared_ptr<Game> game = std::make_shared<PongGame>();
+        std::shared_ptr<Game> game = std::make_shared<VulkanCraft>();
         Application app{game};
         app.Run();
     } catch (const std::runtime_error &error) {

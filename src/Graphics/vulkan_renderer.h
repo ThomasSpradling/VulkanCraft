@@ -1,6 +1,7 @@
 #pragma once
 
-#include "utils/vulkan.h"
+#include "mesh.h"
+#include "utils.h"
 
 #include <GLFW/glfw3.h>
 #include <cstdint>
@@ -12,7 +13,6 @@
 #include <string>
 #include <vector>
 #include <vk_mem_alloc.h>
-
 
 struct RenderProperties {
     const uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
@@ -57,25 +57,35 @@ public:
 
     // Signals completion of this frame so that a future frame may begin.
     void EndFrame();
-    uint32_t GetCurrentFrameIndex() const { return m_current_frame_index; }
 
     void ImmediateSubmit(std::function<void(VkCommandBuffer)> &&callback) const;
-
+    
+    uint32_t GetCurrentFrameIndex() const { return m_current_frame_index; }
     VkDevice GetDevice() const { return m_device; }
     VmaAllocator GetMemoryAllocator() const { return m_allocator; }
     VkDescriptorPool GetDescriptorPool() const { return m_descriptor_pool; }
 
+    
+    size_t SwapChainImageCount() const { return m_swapchain_images.size(); }
+    
+    VkExtent2D DrawExtent() const { return m_swapchain_extent; }
+    
+    VkFormat GetColorFormat() { return m_image_formats.color; }
+    VkFormat GetDepthStencilFormat() { return m_image_formats.depth_stencil; }
+    VkFormat GetDepthOnlyFormat() { return m_image_formats.depth; }
+    VkFormat GetHDRFormat() { return m_image_formats.hdr; }
+
     VkShaderModule LoadShader(const std::string &file_path);
 
-    size_t SwapChainImageCount() const { return m_swapchain_images.size(); }
-
-    // Formats
-    VkFormat GetColorFormat() { return m_image_formats.color; }
-    // VkFormat GetDepthStencilFormat() { return m_image_formats.depth; }
-
+    // Upload CPU mesh data to GPU buffers. The buffers MUST then be managed by the caller.
+    GPUMesh UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const;
+    
+    // Cleans up mesh data. Does NOT guarantee data-hazard safety.
+    void DestroyGPUMesh(const GPUMesh &mesh) const;
+public:
     // Loads the data into a buffer that has already been allocated. Offsets and sizes are represented in bytes.
     template <typename T>
-    void LoadBufferData(VkBuffer buffer, std::vector<T> data, size_t buffer_offset = 0, size_t data_offset = 0, size_t size = 0) {
+    void LoadBufferData(VkBuffer buffer, std::vector<T> data, size_t buffer_offset = 0, size_t data_offset = 0, size_t size = 0) const {
         const size_t buffer_size = size == 0 ? sizeof(T) * data.size() : size;
         
         if (buffer == VK_NULL_HANDLE)
@@ -118,6 +128,7 @@ public:
 private:
     struct ImageFormats {
         VkFormat color;
+        VkFormat depth_stencil;
         VkFormat depth;
         VkFormat hdr;
     };

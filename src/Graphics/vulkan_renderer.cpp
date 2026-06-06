@@ -7,8 +7,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include "utils/vulkan.h"
-#include "utils/errors.h"
+#include <vulkan/vulkan_core.h>
+#include "utils.h"
+#include "../errors.h"
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
@@ -100,52 +101,11 @@ std::optional<Frame> VulkanRenderer::BeginFrame() {
 void VulkanRenderer::EndFrame() {
     const PerFrameData &current_frame = m_frame_data[m_current_frame_index];
 
-    //// Transition images to proper GPU layouts ////
-    {
-        VkImageMemoryBarrier2 draw_image_barrier {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext = nullptr,
-            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .image = current_frame.draw_image,
-            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT,
-        };
-
-        VkImageMemoryBarrier2 swapchain_image_barrier {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext = nullptr,
-            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image = m_swapchain_images[m_swapchain_image_index],
-            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT,
-
-        };
-
-        std::vector<VkImageMemoryBarrier2> image_barriers {
-            draw_image_barrier,
-            swapchain_image_barrier
-        };
-
-        VkDependencyInfo dependency_info {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext = nullptr,
-            .imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size()),
-            .pImageMemoryBarriers = image_barriers.data(),
-        };
-
-        // Transition draw image COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
-        // Transition swapchain image -> VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        vkCmdPipelineBarrier2(current_frame.graphics_command_buffer, &dependency_info);
-    }
-
+    TransitionImageLayout(current_frame.graphics_command_buffer, current_frame.draw_image, IMAGE_SUBRESOURCE_RANGE_DEFAULT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    TransitionImageLayout(current_frame.graphics_command_buffer, m_swapchain_images[m_swapchain_image_index], IMAGE_SUBRESOURCE_RANGE_DEFAULT,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    
     //// Copy image to swapchain ////
     {
         VkImageCopy copy_region {
@@ -172,29 +132,8 @@ void VulkanRenderer::EndFrame() {
     }
 
     // Transition format of swapchain image to prepare for presentation
-    {
-        VkImageMemoryBarrier2 memory_barrier {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .pNext = nullptr,
-            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image = m_swapchain_images[m_swapchain_image_index],
-            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_DEFAULT,
-        };
-
-        VkDependencyInfo dependency_info {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext = nullptr,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &memory_barrier,
-        };
-
-        vkCmdPipelineBarrier2(current_frame.graphics_command_buffer, &dependency_info);
-    }
+    TransitionImageLayout(current_frame.graphics_command_buffer, m_swapchain_images[m_swapchain_image_index], IMAGE_SUBRESOURCE_RANGE_DEFAULT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     vkEndCommandBuffer(current_frame.graphics_command_buffer);
 
@@ -293,6 +232,62 @@ VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) {
     VkShaderModule shader_module;
     vkCreateShaderModule(m_device, &create_info, nullptr, &shader_module);
     return shader_module;
+}
+
+
+GPUMesh VulkanRenderer::UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const {
+    // TODO: The below simply uses two staging buffers, one for each buffer. Rewrite to use just one staging buffer.
+    
+    VkBuffer vertex_buffer;
+    VmaAllocation vertex_buffer_alloc;
+
+    VkBuffer index_buffer;
+    VmaAllocation index_buffer_alloc;
+
+    {
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = vertices.size() * sizeof(MeshVertex),
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = 0,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &vertex_buffer, &vertex_buffer_alloc, nullptr));
+        LoadBufferData(vertex_buffer, vertices);
+    }
+    
+    // Create index buffer
+    {
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = indices.size() * sizeof(uint32_t),
+            .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = 0,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &index_buffer, &index_buffer_alloc, nullptr));
+        LoadBufferData(index_buffer, indices);
+    }
+
+    return GPUMesh {
+        .vertex_buffer = vertex_buffer,
+        .vertex_buffer_alloc = vertex_buffer_alloc,
+        .index_buffer = index_buffer,
+        .index_buffer_alloc = index_buffer_alloc
+    };
+}
+
+void VulkanRenderer::DestroyGPUMesh(const GPUMesh &mesh) const {
+    vmaDestroyBuffer(m_allocator, mesh.vertex_buffer, mesh.vertex_buffer_alloc);
+    vmaDestroyBuffer(m_allocator, mesh.index_buffer, mesh.index_buffer_alloc);
 }
 
 ///////////////////////
@@ -643,22 +638,42 @@ void VulkanRenderer::InitVulkanDevice() {
         return VK_FORMAT_UNDEFINED;
     };
 
-    const std::vector<VkFormat> color_candidates = {
-        VK_FORMAT_R8G8B8A8_UNORM,
-        VK_FORMAT_R8G8B8A8_SRGB
-    };
-    m_image_formats.color = pick_supported_format(color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-    if (m_image_formats.color == VK_FORMAT_UNDEFINED)
-        throw std::runtime_error("Cannot find valid color format!\n");
-    
-    const std::vector<VkFormat> hdr_color_candidates = {
-        VK_FORMAT_R16G16B16A16_SFLOAT,
-        VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-    };
-    m_image_formats.hdr = pick_supported_format(hdr_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-    if (m_image_formats.hdr == VK_FORMAT_UNDEFINED)
-        std::cerr << "Cannot find valid hdr format!\n";
-    // TODO: Default to color attachment
+    {
+        /// --- COLOR //
+        // ordered from most preferable
+        const std::vector<VkFormat> color_candidates = {
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_R8G8B8A8_SRGB
+        };
+        m_image_formats.color = pick_supported_format(color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+
+        /// --- DEPTH STENCIL //
+        const std::vector<VkFormat> depth_stencil_candidates = {
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT,
+            VK_FORMAT_D16_UNORM_S8_UINT
+        };
+        m_image_formats.depth_stencil = pick_supported_format(depth_stencil_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        Assert(m_image_formats.depth_stencil != VK_FORMAT_UNDEFINED, "Cannot find valid depth-stencil format");
+
+        /// --- DEPTH ONLY //
+        const std::vector<VkFormat> depth_candidates = {
+            VK_FORMAT_D32_SFLOAT,
+            VK_FORMAT_D16_UNORM,
+        };
+        m_image_formats.depth = pick_supported_format(depth_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        Assert(m_image_formats.depth != VK_FORMAT_UNDEFINED, "Cannot find valid depth format");
+
+        /// --- HDR COLOR //
+        const std::vector<VkFormat> hdr_color_candidates = {
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+            VK_FORMAT_R8G8B8A8_SRGB // not a valid HDR format, but will do as fallback
+        };
+        m_image_formats.hdr = pick_supported_format(hdr_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid HDR format");
+    }
 
     //// Create immediate command buffers and command pools ////
     {
@@ -955,7 +970,6 @@ void VulkanRenderer::ResizeSwapChain() {
     m_swapchain_resize_requested = false;
 
     DestroyFrameData();
-    // DestroySwapChain();
     CreateSwapChain(m_props.window_extent);
     InitFrameData();
     m_current_frame_index = 0;

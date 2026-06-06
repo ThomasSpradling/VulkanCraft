@@ -1,15 +1,16 @@
 #pragma once
 
-#include "events/event_handler.h"
-#include "events/window_events/key_events.h"
-#include "game.h"
-#include "GLFW/glfw3.h"
-#include "glm/ext/vector_float2.hpp"
-#include "glm/ext/vector_int2.hpp"
-#include "vulkan_renderer.h"
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <glm/glm.hpp>
+#include <GLFW/glfw3.h>
+
+#include "Events/event_handler.h"
+#include "Events/WindowEvents/key_events.h"
+#include "game.h"
+#include "Graphics/vulkan_renderer.h"
+
 
 /**
  * @brief Manages the program as a software-level application. This includes

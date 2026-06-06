@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 project(vulkan_craft LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -15,7 +15,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Resource Paths
-add_compile_definitions(RESOURCE_PATH="${CMAKE_SOURCE_DIR}/resources/")
+add_compile_definitions(RESOURCE_PATH="${CMAKE_SOURCE_DIR}/resources")
 
 
 # Dependencies
@@ -27,7 +27,7 @@ find_package(Vulkan REQUIRED)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/glfw)
+add_subdirectory(third_party/glfw SYSTEM)
 
 ## STB
 add_library(stb
@@ -36,13 +36,20 @@ add_library(stb
 )
 target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
 
+## tinygltf
+
+set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_INSTALL_VENDOR OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/tinygltf SYSTEM)
+
 ## GLM
 set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(GLM_TEST_ENABLE OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/glm)
+add_subdirectory(third_party/glm SYSTEM)
 
 ## Volk
-add_subdirectory(third_party/volk)
+add_subdirectory(third_party/volk SYSTEM)
 if (WIN32)
     target_compile_definitions(volk PRIVATE VK_USE_PLATFORM_WIN32_KHR)
 endif()
@@ -67,7 +74,7 @@ target_compile_definitions(imgui PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
 target_link_libraries(imgui volk glfw)
 
 ## Vulkan Memory Allocator
-add_subdirectory(third_party/VulkanMemoryAllocator)
+add_subdirectory(third_party/VulkanMemoryAllocator SYSTEM)
 
 # Source
 
@@ -96,5 +103,6 @@ target_link_libraries(${PROJECT_NAME}
     glm::glm
     volk::volk
     VulkanMemoryAllocator
+    tinygltf
     imgui
 )

@@ -204,6 +204,34 @@ void VulkanRenderer::ImmediateSubmit(std::function<void(VkCommandBuffer)> &&call
     VK_CHECK(vkWaitForFences(m_device, 1, &m_graphics_fence, VK_TRUE, 1'000'000'000));
 }
 
+void VulkanRenderer::WriteDescriptorBuffer(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorBufferInfo descriptor_info, VkDescriptorType type) {
+    VkWriteDescriptorSet write_descriptor_set {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptor_set,
+        .dstBinding = binding,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = type,
+        .pBufferInfo = &descriptor_info,
+    };
+
+    vkUpdateDescriptorSets(m_device, 1, &write_descriptor_set, 0, nullptr);
+}
+
+void VulkanRenderer::WriteDescriptorImage(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorImageInfo descriptor_info, VkDescriptorType type) {
+    VkWriteDescriptorSet write_descriptor_set {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptor_set,
+        .dstBinding = binding,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = type,
+        .pImageInfo = &descriptor_info,
+    };
+
+    vkUpdateDescriptorSets(m_device, 1, &write_descriptor_set, 0, nullptr);
+}
+
 VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) {
     std::ifstream file(file_path, std::ios::ate | std::ios::binary);
     if (!file.is_open())
@@ -249,7 +277,8 @@ GPUMesh VulkanRenderer::UploadGPUMesh(const std::vector<MeshVertex> &vertices, c
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .pNext = nullptr,
             .size = vertices.size() * sizeof(MeshVertex),
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            // .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
         VmaAllocationCreateInfo allocation_create_info {
@@ -277,11 +306,18 @@ GPUMesh VulkanRenderer::UploadGPUMesh(const std::vector<MeshVertex> &vertices, c
         LoadBufferData(index_buffer, indices);
     }
 
+    VkBufferDeviceAddressInfo buffer_device_address_info {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .buffer = vertex_buffer,
+    };
+    VkDeviceAddress address = vkGetBufferDeviceAddress(m_device, &buffer_device_address_info);
+
     return GPUMesh {
         .vertex_buffer = vertex_buffer,
         .vertex_buffer_alloc = vertex_buffer_alloc,
         .index_buffer = index_buffer,
-        .index_buffer_alloc = index_buffer_alloc
+        .index_buffer_alloc = index_buffer_alloc,
+        .device_address = address
     };
 }
 
@@ -700,34 +736,9 @@ void VulkanRenderer::InitVulkanDevice() {
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
     VK_CHECK(vkCreateFence(m_device, &fence_create_info, nullptr, &m_graphics_fence));
-
-    //// Create Descriptor Pool ////
-    {
-        // TODO: Use more sophisticated way of getting the descriptor pool sizes
-        std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> sizes{};
-        sizes.fill(1024);
-        std::vector<VkDescriptorPoolSize> pool_sizes;
-        for (size_t i = 0; i < sizes.size(); ++i) {
-            if (sizes[i] > 0) {
-                pool_sizes.push_back({ static_cast<VkDescriptorType>(i), sizes[i] });
-            }
-        }
-
-        VkDescriptorPoolCreateInfo create_info {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-            .maxSets = DESCRIPTOR_POOL_MAX_SETS,
-            .poolSizeCount = sizes.size(),
-            .pPoolSizes = pool_sizes.data(),
-        };
-        VK_CHECK(vkCreateDescriptorPool(m_device, &create_info, nullptr, &m_descriptor_pool));
-    }
 }
 
 void VulkanRenderer::DestroyVulkanDevice() {
-    vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
-
     vkDestroyFence(m_device, m_graphics_fence, nullptr);
 
     vkFreeCommandBuffers(m_device, m_graphics_command_pool, 1, &m_graphics_command_buffer);

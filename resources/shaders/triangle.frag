@@ -9,6 +9,6 @@ layout(set = 0, binding = 0) uniform Color {
 
 void main() {
     // frag_color = vec4(u_color, 1.0);
-    // frag_color = mix(vec4(u_color, 1.0), vec4(v_color), 0.5);
-    frag_color = v_color;
+    frag_color = mix(vec4(u_color, 1.0), vec4(v_color), 0.5);
+    // frag_color = v_color;
 }

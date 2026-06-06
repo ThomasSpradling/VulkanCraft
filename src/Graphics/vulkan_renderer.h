@@ -1,5 +1,6 @@
 #pragma once
 
+#include "descriptor_allocator.h"
 #include "mesh.h"
 #include "utils.h"
 
@@ -63,8 +64,6 @@ public:
     uint32_t GetCurrentFrameIndex() const { return m_current_frame_index; }
     VkDevice GetDevice() const { return m_device; }
     VmaAllocator GetMemoryAllocator() const { return m_allocator; }
-    VkDescriptorPool GetDescriptorPool() const { return m_descriptor_pool; }
-
     
     size_t SwapChainImageCount() const { return m_swapchain_images.size(); }
     
@@ -74,6 +73,9 @@ public:
     VkFormat GetDepthStencilFormat() { return m_image_formats.depth_stencil; }
     VkFormat GetDepthOnlyFormat() { return m_image_formats.depth; }
     VkFormat GetHDRFormat() { return m_image_formats.hdr; }
+
+    void WriteDescriptorBuffer(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorBufferInfo descriptor_info, VkDescriptorType type);
+    void WriteDescriptorImage(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorImageInfo descriptor_info, VkDescriptorType type);
 
     VkShaderModule LoadShader(const std::string &file_path);
 
@@ -146,8 +148,6 @@ private:
         VkImageView draw_image_view;
         VmaAllocation draw_image_allocation;
     };
-
-    const uint32_t DESCRIPTOR_POOL_MAX_SETS = 2048;
 private:
     RenderProperties m_props;
 
@@ -169,6 +169,7 @@ private:
     VkFence m_graphics_fence = VK_NULL_HANDLE;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    std::unique_ptr<DescriptorAllocator> m_descriptor_allocator = nullptr;
 
     ImageFormats m_image_formats;
 
@@ -182,8 +183,6 @@ private:
 
     std::vector<PerFrameData> m_frame_data;
     uint32_t m_current_frame_index = 0; // Current frame in flight
-
-    VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;
 private:
     void InitVulkanInstance();
     void DestroyVulkanInstance();

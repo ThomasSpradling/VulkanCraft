@@ -76,9 +76,10 @@ void GLTFModel::Load(std::filesystem::path file_path) {
                 IterateAccessor<glm::vec3>(model, position_accessor, [&](uint32_t i, glm::vec3 pos) {
                     MeshVertex new_vertex {
                         .position = pos,
+                        .uv_x = 0.0f,
                         .normal = glm::vec3(1, 0, 0),
+                        .uv_y = 0.0f,
                         .color = glm::vec4(1.0f),
-                        .uv = glm::vec2(0.0f),
                     };
                     vertices[initial_vertex + i] = new_vertex;
                 });
@@ -107,7 +108,8 @@ void GLTFModel::Load(std::filesystem::path file_path) {
                 tinygltf::Accessor &normal_accessor = model.accessors[primitive.attributes.at("TEXCOORD_0")];
                 
                 IterateAccessor<glm::vec2>(model, normal_accessor, [&](uint32_t i, glm::vec2 uv) {
-                    vertices[initial_vertex + i].uv = uv;
+                    vertices[initial_vertex + i].uv_x = uv.x;
+                    vertices[initial_vertex + i].uv_y = uv.y;
                 });
             }
 

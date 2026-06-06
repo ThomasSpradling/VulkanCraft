@@ -31,6 +31,7 @@ private:
 
     struct PushConstantData {
         glm::mat4 view_projection;
+        VkDeviceAddress vertex_buffer;
     };
 private:
     float m_money = 0.0f;
@@ -47,6 +48,8 @@ private:
     VkDescriptorSetLayout m_model_uniform_layout = VK_NULL_HANDLE;
 
     PushConstantData m_push_constants;
+
+    std::unique_ptr<DescriptorAllocator> m_descriptor_allocator; 
 
     std::vector<PerFrameData> m_frame_data;
     UniformData m_uniform_data;

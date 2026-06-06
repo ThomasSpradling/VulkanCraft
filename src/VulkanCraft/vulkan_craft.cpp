@@ -7,6 +7,8 @@
 #include "../Events/WindowEvents/key_events.h"
 #include "../Events/WindowEvents/mouse_events.h"
 #include "../Events/event_dispatcher.h"
+#include "../Graphics/descriptor_layout_builder.h"
+#include "../Graphics/descriptor_writer.h"
 
 #include "../Graphics/pipeline_builder.h"
 #include <vulkan/vulkan_core.h>
@@ -140,12 +142,13 @@ void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
         // Bind graphics and draw
         vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline);
         vkCmdBindDescriptorSets(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline_layout, 0, 1, &m_frame_data[i].view_descriptor_set, 0, nullptr);
-        vkCmdPushConstants(frame->cmd, m_triangle_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &m_push_constants);
-
+        
         VkDeviceSize offsets[] = { 0 };
-
+        
         for (auto &mesh : m_model->GetMeshes()) {
-            vkCmdBindVertexBuffers(frame->cmd, 0, 1, &mesh->mesh_buffers.vertex_buffer, offsets);
+            // vkCmdBindVertexBuffers(frame->cmd, 0, 1, &mesh->mesh_buffers.vertex_buffer, offsets);
+            m_push_constants.vertex_buffer = mesh->mesh_buffers.device_address;
+            vkCmdPushConstants(frame->cmd, m_triangle_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &m_push_constants);
             vkCmdBindIndexBuffer(frame->cmd, mesh->mesh_buffers.index_buffer, 0, VK_INDEX_TYPE_UINT32);
             
             for (auto &primitive : mesh->primitives) {
@@ -216,7 +219,7 @@ void VulkanCraft::DestroyRenderTargets() {
 }
 
 void VulkanCraft::InitGeometry() {
-    m_model = std::make_shared<GLTFModel>(*m_renderer, RESOURCE_PATH "/models/Cube/Cube.gltf");
+    m_model = std::make_shared<GLTFModel>(*m_renderer, RESOURCE_PATH "/models/cylinder.glb");
 }
 
 void VulkanCraft::DestroyGeometry() {
@@ -225,34 +228,23 @@ void VulkanCraft::DestroyGeometry() {
 }
 
 void VulkanCraft::InitPipelines() {
+    // Set up descriptor buffer
+    m_descriptor_allocator = std::make_unique<DescriptorAllocator>(m_renderer->GetDevice());
+    
+    std::vector<DescriptorPoolRatios> ratios {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+    };
+    m_descriptor_allocator->Init(10, ratios);
+
     // Create uniform buffers for view-projection matrix
     {
-        const uint32_t VIEW_BINDING = 0;
-        const VkDeviceSize uniform_buffer_size = sizeof(UniformData); // TODO
+        const VkDeviceSize uniform_buffer_size = sizeof(UniformData);
+        m_view_uniform_layout = DescriptorLayoutBuilder(m_renderer->GetDevice())
+            .AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            .Build(VK_SHADER_STAGE_FRAGMENT_BIT);
 
-        VkDescriptorSetLayoutBinding view_ubo_binding = {
-            .binding = VIEW_BINDING,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        };
-
-        VkDescriptorSetLayoutCreateInfo create_info {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            .bindingCount = 1,
-            .pBindings = &view_ubo_binding
-        };
-        VK_CHECK(vkCreateDescriptorSetLayout(m_renderer->GetDevice(), &create_info, nullptr, &m_view_uniform_layout));
-        
         for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
-            // Allocate descriptor set
-            VkDescriptorSetAllocateInfo allocate_info {
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                .descriptorPool = m_renderer->GetDescriptorPool(),
-                .descriptorSetCount = 1,
-                .pSetLayouts = &m_view_uniform_layout,
-            };
-            VK_CHECK(vkAllocateDescriptorSets(m_renderer->GetDevice(), &allocate_info, &m_frame_data[i].view_descriptor_set));
+            m_frame_data[i].view_descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_view_uniform_layout);
             
             // Create uniform buffer
             VkBufferCreateInfo buffer_create_info {
@@ -262,7 +254,6 @@ void VulkanCraft::InitPipelines() {
                 .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
-
             VmaAllocationCreateInfo allocation_create_info {
                 .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                 .usage = VMA_MEMORY_USAGE_AUTO,
@@ -270,21 +261,13 @@ void VulkanCraft::InitPipelines() {
             VK_CHECK(vmaCreateBuffer(m_renderer->GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &m_frame_data[i].view_uniform_buffer, &m_frame_data[i].view_uniform_allocation, nullptr));
             
             // Initialize uniform buffer
-            VkDescriptorBufferInfo buffer_info {
-                .buffer = m_frame_data[i].view_uniform_buffer,
-                .offset = 0,
-                .range = uniform_buffer_size,
-            };
-            VkWriteDescriptorSet write_descriptor_set {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = m_frame_data[i].view_descriptor_set,
-                .dstBinding = VIEW_BINDING,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .pBufferInfo = &buffer_info
-            };
-            vkUpdateDescriptorSets(m_renderer->GetDevice(), 1, &write_descriptor_set, 0, nullptr);
+            DescriptorWriter(m_renderer->GetDevice())
+                .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
+                    .buffer = m_frame_data[i].view_uniform_buffer,
+                    .offset = 0,
+                    .range = uniform_buffer_size,
+                })
+                .Write(m_frame_data[i].view_descriptor_set);
         }
     }
     
@@ -316,15 +299,16 @@ void VulkanCraft::InitPipelines() {
     VK_CHECK(vkCreatePipelineLayout(m_renderer->GetDevice(), &pipeline_layout_create_info, nullptr, &m_triangle_pipeline_layout))
 
     m_triangle_pipeline = PipelineBuilder_Graphics(m_renderer->GetDevice(), m_triangle_pipeline_layout)
-        .AddBinding(0, sizeof(MeshVertex))
-        .AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position))
-        .AddAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal))
-        .AddAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color))
-        .AddAttribute(3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv))
+        // .AddBinding(0, sizeof(MeshVertex))
+        // .AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position))
+        // .AddAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal))
+        // .AddAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color))
+        // .AddAttribute(3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv))
     
         .AddColorAttachmentFormat(m_renderer->GetColorFormat())
         .SetDepthAttachmentFormat(m_renderer->GetDepthOnlyFormat())
         .EnableDepthTest()
+        // .EnableBlendingAlpha()
         
         .AddShaderStage(VK_SHADER_STAGE_VERTEX_BIT, vertex_shader_module)
         .AddShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, fragment_shader_module)
@@ -340,8 +324,9 @@ void VulkanCraft::DestroyPipelines() {
 
     for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
         vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_frame_data[i].view_uniform_buffer, m_frame_data[i].view_uniform_allocation);
-        vkFreeDescriptorSets(m_renderer->GetDevice(), m_renderer->GetDescriptorPool(), 1, &m_frame_data[i].view_descriptor_set);
     }
+    m_descriptor_allocator->Destroy();
+    
     vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_view_uniform_layout, nullptr);
 }
 

@@ -5,16 +5,7 @@
 #include <volk.h>
 
 void DescriptorAllocator::Init(uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios) {
-    uint32_t ratio_sum = 0.0f;
-    for (auto &r : ratios)
-        ratio_sum += r.ratio;
-
-    for (auto &r : ratios) {
-        m_ratios.push_back({
-            .type = r.type,
-            .ratio = r.ratio / ratio_sum,
-        });
-    }
+    m_sets_per_pool = max_sets;
     VkDescriptorPool pool = CreateDescriptorPool();
     m_sets_per_pool = max_sets * 1.5f;
     m_ready_pools.push_back(pool);

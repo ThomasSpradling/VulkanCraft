@@ -1,27 +1,28 @@
 #include "descriptor_writer.h"
 #include "utils.h"
+#include <vulkan/vulkan_core.h>
 
-DescriptorWriter &DescriptorWriter::WriteImage(uint32_t binding, VkDescriptorType type, const VkDescriptorImageInfo &info) {
+DescriptorWriter &DescriptorWriter::WriteBuffer(uint32_t binding, VkDescriptorType type, const VkDescriptorBufferInfo &info) {
     VkWriteDescriptorSet write_descriptor_set {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstBinding = 0,
+        .dstBinding = binding,
         .dstArrayElement = 0,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pImageInfo = &info,
+        .descriptorType = type,
+        .pBufferInfo = &info,
     };
     m_writes.push_back(write_descriptor_set);
     return *this;
 }
 
-DescriptorWriter &DescriptorWriter::WriteBuffer(uint32_t binding, VkDescriptorType type, const VkDescriptorBufferInfo &info) {
+DescriptorWriter &DescriptorWriter::WriteImage(uint32_t binding, VkDescriptorType type, const VkDescriptorImageInfo &info) {
     VkWriteDescriptorSet write_descriptor_set {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstBinding = 0,
+        .dstBinding = binding,
         .dstArrayElement = 0,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &info,
+        .descriptorType = type,
+        .pImageInfo = &info,
     };
     m_writes.push_back(write_descriptor_set);
     return *this;

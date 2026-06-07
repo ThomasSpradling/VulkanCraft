@@ -2,13 +2,18 @@
 // #include "../game.h"
 #include "../application.h"
 #include "../Events/event_listener.h"
-#include "../Graphics/mesh.h"
+#include "../Graphics/gpu_structs.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include "../Graphics/gltf_model.h"
 
-struct UniformData {
-    glm::vec3 color;
+struct SceneData {
+    glm::mat4 view;
+    glm::mat4 projection;
+    glm::mat4 view_projection;
+    glm::vec4 ambient_color;
+    glm::vec4 sunlight_direction;
+    glm::vec4 sunlight_color;
 };
 
 class VulkanCraft : public Game, public EventListener {
@@ -20,9 +25,9 @@ public:
     virtual void OnEvent(const Event &event) override;
 private:
     struct PerFrameData {
-        VkDescriptorSet view_descriptor_set = VK_NULL_HANDLE;
-        VkBuffer view_uniform_buffer = VK_NULL_HANDLE;
-        VmaAllocation view_uniform_allocation = VK_NULL_HANDLE;
+        VkDescriptorSet global_descriptor_set = VK_NULL_HANDLE;
+        VkBuffer global_uniform_buffer = VK_NULL_HANDLE;
+        VmaAllocation global_uniform_buffer_alloc = VK_NULL_HANDLE;
 
         VkImage depth_image;
         VkImageView depth_image_view;
@@ -30,35 +35,51 @@ private:
     };
 
     struct PushConstantData {
-        glm::mat4 view_projection;
+        glm::mat4 model;
         VkDeviceAddress vertex_buffer;
     };
+
+    struct RenderObject {
+        uint32_t index_count;
+        uint32_t start_index;
+        VkBuffer index_buffer;
+
+        glm::mat4 transform;
+        VkDeviceAddress vertex_buffer;
+
+        // Pipeline
+        VkPipeline pipeline;
+        VkPipelineLayout pipeline_layout;
+
+        // Material
+        VkDescriptorSet material_descriptor_set;
+    };
 private:
-    float m_money = 0.0f;
-    bool m_claimed_prize = false;
+    // Temporary for input testing
     glm::vec3 m_current_color = { 164.0f/256.0f, 30.0f/256.0f, 34.0f/256.0f };
 
-    VkPipelineLayout m_triangle_pipeline_layout = VK_NULL_HANDLE;
-    VkPipeline m_triangle_pipeline = VK_NULL_HANDLE;
-
-    // GPUMesh m_mesh;
     std::shared_ptr<GLTFModel> m_model;
 
-    VkDescriptorSetLayout m_view_uniform_layout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_model_uniform_layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_global_layout = VK_NULL_HANDLE;
+    GLTFCoreData m_gltf_common_data;
 
     PushConstantData m_push_constants;
 
     std::unique_ptr<DescriptorAllocator> m_descriptor_allocator; 
 
     std::vector<PerFrameData> m_frame_data;
-    UniformData m_uniform_data;
+    SceneData m_scene_data;
+
+    std::vector<RenderObject> m_render_objects;
 private:
     void InitRenderTargets();
     void DestroyRenderTargets();
 
     void InitGeometry();
     void DestroyGeometry();
+
+    void InitTextures();
+    void DestroyTextures();
 
     void InitPipelines();
     void DestroyPipelines();

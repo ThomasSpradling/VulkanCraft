@@ -29,9 +29,11 @@ void VulkanRenderer::Initialize() {
     InitVulkanDevice();
     CreateSwapChain(m_props.window_extent);
     InitFrameData();
+    InitDefaults();
 }
 
 void VulkanRenderer::ShutDown() {
+    DestroyDefaults();
     DestroyFrameData();
     DestroySwapChain();
     DestroyVulkanDevice();
@@ -324,6 +326,59 @@ GPUMesh VulkanRenderer::UploadGPUMesh(const std::vector<MeshVertex> &vertices, c
 void VulkanRenderer::DestroyGPUMesh(const GPUMesh &mesh) const {
     vmaDestroyBuffer(m_allocator, mesh.vertex_buffer, mesh.vertex_buffer_alloc);
     vmaDestroyBuffer(m_allocator, mesh.index_buffer, mesh.index_buffer_alloc);
+}
+
+void VulkanRenderer::LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout) const {
+    // TODO: Also add option to generate mipmaps
+    if (image.image == VK_NULL_HANDLE)
+        throw std::runtime_error("Cannot load data into a null image.");
+
+    // Assumes 4-channel image
+    const size_t data_size = image.extent.width * image.extent.height * image.extent.depth * 4;
+
+    // Create staging buffer
+    VkBuffer staging_buffer;
+    VmaAllocation staging_buffer_alloc;
+    VmaAllocationInfo staging_allocation_info;
+    {
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = data_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+
+        VK_CHECK(vmaCreateBuffer(m_allocator, &buffer_create_info, &allocation_create_info, &staging_buffer, &staging_buffer_alloc, &staging_allocation_info));
+    }
+
+    // Copy raw data into this buffer
+    std::memcpy(staging_allocation_info.pMappedData, data, data_size);
+    ImmediateSubmit([&](VkCommandBuffer cmd) {
+        TransitionImageLayout(cmd, image.image, IMAGE_SUBRESOURCE_RANGE_ALL, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy copy_region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .imageExtent = image.extent,
+        };
+
+        vkCmdCopyBufferToImage(cmd, staging_buffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+        if (dst_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+            TransitionImageLayout(cmd, image.image, IMAGE_SUBRESOURCE_RANGE_ALL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_layout);
+        }
+    });
+    vmaDestroyBuffer(m_allocator, staging_buffer, staging_buffer_alloc);
 }
 
 ///////////////////////
@@ -1023,4 +1078,100 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanRenderer::DebugCallback(
     // }
 
     return VK_FALSE;
+}
+
+void VulkanRenderer::InitDefaults() {
+    //// ---- Default Samplers ---- ////
+    VkSamplerCreateInfo nearest_sampler_create_info {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+    };
+
+    VkSamplerCreateInfo linear_sampler_create_info {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+    };
+    VK_CHECK(vkCreateSampler(m_device, &nearest_sampler_create_info, nullptr, &m_default_samplers.nearest));
+    VK_CHECK(vkCreateSampler(m_device, &linear_sampler_create_info, nullptr, &m_default_samplers.linear));
+
+    uint32_t gray = glm::packUnorm4x8(glm::vec4(0.65f, 0.65f, 0.65f, 1.0f));
+    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
+    uint32_t black = glm::packUnorm4x8(glm::vec4(0));
+
+    // Default black material
+    {
+        m_default_textures.black = CreateDefaultImage(VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM);
+        LoadImageData(*m_default_textures.black, (void *) &black, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+
+    // Default gray material
+    {
+        m_default_textures.gray = CreateDefaultImage(VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM);
+        LoadImageData(*m_default_textures.gray, (void *) &gray, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+
+    // Default checker material
+    {
+        m_default_textures.checker = CreateDefaultImage(VkExtent3D{16, 16, 1}, VK_FORMAT_R8G8B8A8_UNORM);
+        std::array<uint32_t, 16 * 16> checker_pixels; //for 16x16 checkerboard texture
+        for (int x = 0; x < 16; ++x) {
+            for (int y = 0; y < 16; ++y) {
+                checker_pixels[y*16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+            }
+        }
+        LoadImageData(*m_default_textures.checker, checker_pixels.data(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+}
+
+void VulkanRenderer::DestroyDefaults() {
+    vkDestroySampler(m_device, m_default_samplers.nearest, nullptr);
+    vkDestroySampler(m_device, m_default_samplers.linear, nullptr);
+    
+    vkDestroyImageView(m_device, m_default_textures.black->image_view, nullptr);
+    vmaDestroyImage(m_allocator, m_default_textures.black->image, m_default_textures.black->allocation);
+
+    vkDestroyImageView(m_device, m_default_textures.gray->image_view, nullptr);
+    vmaDestroyImage(m_allocator, m_default_textures.gray->image, m_default_textures.gray->allocation);
+
+    vkDestroyImageView(m_device, m_default_textures.checker->image_view, nullptr);
+    vmaDestroyImage(m_allocator, m_default_textures.checker->image, m_default_textures.checker->allocation);
+}
+
+std::shared_ptr<GPUImage> VulkanRenderer::CreateDefaultImage(VkExtent3D extent, VkFormat format) {
+    GPUImage image {
+        .extent = extent,
+        .format = format,
+    };
+    
+    VkImageCreateInfo image_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VmaAllocationCreateInfo allocation_create_info {
+        .flags = 0,
+        .usage = VMA_MEMORY_USAGE_AUTO,
+    };
+
+    vmaCreateImage(m_allocator, &image_create_info, &allocation_create_info, &image.image, &image.allocation, nullptr);
+
+    VkImageViewCreateInfo image_view_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = image.format,
+        .components = COMPONENT_MAPPING_DEFAULT,
+        .subresourceRange = IMAGE_SUBRESOURCE_RANGE_ALL,
+    };
+    vkCreateImageView(m_device, &image_view_create_info, nullptr, &image.image_view);
+    return std::make_shared<GPUImage>(image);
 }

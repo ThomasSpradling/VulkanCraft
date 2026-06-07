@@ -1,10 +1,25 @@
 #include "gltf_model.h"
 #include "../errors.h"
+#include "descriptor_allocator.h"
+#include "descriptor_writer.h"
+#include <glm/ext/vector_float4.hpp>
 #include <iostream>
+#include <tuple>
+#include <glm/gtc/type_ptr.hpp>
+#include <utility>
+#include <vector>
+#include <vulkan/vulkan_core.h>
 
-GLTFModel::GLTFModel(const VulkanRenderer &renderer, std::filesystem::path file_path)
+GLTFModel::GLTFModel(const VulkanRenderer &renderer, const GLTFCoreData &core, std::filesystem::path file_path)
     : m_renderer(renderer)
+    , m_core(core)
 {
+    m_descriptor_allocator = std::make_unique<DescriptorAllocator>(renderer.GetDevice());
+    std::vector<DescriptorPoolRatios> ratios {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+    };
+    m_descriptor_allocator->Init(16, ratios);
     Load(file_path);
 }
 
@@ -40,6 +55,198 @@ void GLTFModel::Load(std::filesystem::path file_path) {
     uint32_t default_scene_index = model.defaultScene == -1 ? 0 : model.defaultScene;
     const tinygltf::Scene &scene = model.scenes[default_scene_index];
 
+    //// ---- Load Samplers ---- ////
+    for (const tinygltf::Sampler &sampler : model.samplers) {
+        VkSampler device_sampler;
+        // TODO: Check that minFilter and magFilter yield same mipmap modes
+        auto [min_filter, mipmap_mode1] = GetVulkanTextureFilters(sampler.minFilter);
+        auto [mag_filter, mipmap_mode2] = GetVulkanTextureFilters(sampler.magFilter);
+        VkSamplerCreateInfo sampler_create_info {
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = min_filter,
+            .minFilter = mag_filter,
+            .mipmapMode = mipmap_mode1,
+            .addressModeU = GetVulkanAddressMode(sampler.wrapS),
+            .addressModeV = GetVulkanAddressMode(sampler.wrapT),
+        };
+        VK_CHECK(vkCreateSampler(m_renderer.GetDevice(), &sampler_create_info, nullptr, &device_sampler));
+        m_samplers.push_back(device_sampler);
+    }
+
+    //// ---- Load Images ---- ////
+    for (tinygltf::Image &image : model.images) {
+        VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+        VkExtent3D extent {
+            .width = static_cast<uint32_t>(image.width),
+            .height = static_cast<uint32_t>(image.height),
+            .depth = 1,
+        };
+        GPUImage device_image {
+            .extent = extent,
+            .format = format,
+        };
+        VkImageCreateInfo image_create_info {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = format,
+            .extent = extent,
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = 0,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+
+        vmaCreateImage(m_renderer.GetMemoryAllocator(), &image_create_info, &allocation_create_info, &device_image.image, &device_image.allocation, nullptr);
+
+        VkImageViewCreateInfo image_view_create_info {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = device_image.image,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = device_image.format,
+            .components = COMPONENT_MAPPING_DEFAULT,
+            .subresourceRange = IMAGE_SUBRESOURCE_RANGE_ALL,
+        };
+        vkCreateImageView(m_renderer.GetDevice(), &image_view_create_info, nullptr, &device_image.image_view);
+
+        m_renderer.LoadImageData(device_image, image.image.data(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_images.push_back(std::make_shared<GPUImage>(std::move(device_image)));
+    }
+
+    //// ---- Load Materials ---- ////
+    if (model.materials.empty()) {
+        // Create a single default material
+
+        GLTFMaterialResources resources;
+        resources.descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_core.material_layout);
+
+        // Create uniform buffer
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = sizeof(GLTFMaterialData),
+            .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VmaAllocationInfo alloc_info;
+        VK_CHECK(vmaCreateBuffer(m_renderer.GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &resources.uniform_buffer, &resources.uniform_buffer_alloc, &alloc_info));
+        auto *uniform_data = static_cast<GLTFMaterialData *>(alloc_info.pMappedData);
+        uniform_data->color_factors = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        uniform_data->metallic_roughness_factors = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+
+        // Create Albedo image
+        VkSampler albedo_sampler = m_renderer.GetDefaultSamplers().nearest;
+        resources.color_image = m_renderer.GetDefaultTextures().gray;
+
+        // Create Metallic Roughness Image
+        VkSampler metallic_roughness_sampler = m_renderer.GetDefaultSamplers().nearest;
+        resources.metallic_roughness_image = m_renderer.GetDefaultTextures().black;
+
+        DescriptorWriter(m_renderer.GetDevice())
+            .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
+                .buffer = resources.uniform_buffer,
+                .offset = 0,
+                .range = sizeof(GLTFMaterialData),
+            })
+            .WriteImage(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {
+                .sampler = albedo_sampler,
+                .imageView = resources.color_image->image_view,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            })
+            .WriteImage(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {
+                .sampler = metallic_roughness_sampler,
+                .imageView = resources.metallic_roughness_image->image_view,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            })
+            .Write(resources.descriptor_set);
+        m_material_data.push_back(std::move(resources));
+    }
+
+    for (const tinygltf::Material &material : model.materials) {
+        // TODO: Better error detection
+        GLTFMaterialResources resources;
+
+        // Allocate a descriptor set and write all these material data to it.
+        resources.descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_core.material_layout);
+        
+        // Create uniform buffer
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = sizeof(GLTFMaterialData),
+            .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VmaAllocationInfo alloc_info;
+        VK_CHECK(vmaCreateBuffer(m_renderer.GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &resources.uniform_buffer, &resources.uniform_buffer_alloc, &alloc_info));
+        auto *uniform_data = static_cast<GLTFMaterialData *>(alloc_info.pMappedData);
+        uniform_data->color_factors = glm::make_vec4(material.pbrMetallicRoughness.baseColorFactor.data());
+        uniform_data->metallic_roughness_factors = glm::vec4(
+            material.pbrMetallicRoughness.metallicFactor,
+            material.pbrMetallicRoughness.roughnessFactor,
+            0.0f, 0.0f
+        );
+
+        // Find albedo image
+        VkSampler albedo_sampler;
+        int color_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
+        if (color_texture_index > -1) {
+            tinygltf::Texture &albedo_texture = model.textures[material.pbrMetallicRoughness.baseColorTexture.index];
+            albedo_sampler = m_samplers[albedo_texture.sampler];
+            resources.color_image = m_images[albedo_texture.source];
+        } else {
+            std::cerr << "WARNING: Missing Color Image\n";
+            albedo_sampler = m_renderer.GetDefaultSamplers().nearest;
+            resources.color_image = m_renderer.GetDefaultTextures().checker;
+        }
+
+        // Find metallic roughness image
+        VkSampler metallic_roughness_sampler;
+        int metallic_roughness_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
+        if (metallic_roughness_texture_index > -1) {
+            tinygltf::Texture &metallic_roughness_texture = model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
+            metallic_roughness_sampler = m_samplers[metallic_roughness_texture.sampler];
+            resources.metallic_roughness_image = m_images[metallic_roughness_texture.source];
+        } else {
+            std::cerr << "WARNING: Missing Metallic Roughness Image\n";
+            metallic_roughness_sampler = m_renderer.GetDefaultSamplers().nearest;
+            resources.metallic_roughness_image = m_renderer.GetDefaultTextures().black;
+        }
+
+        DescriptorWriter(m_renderer.GetDevice())
+            .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
+                .buffer = resources.uniform_buffer,
+                .offset = 0,
+                .range = sizeof(GLTFMaterialData),
+            })
+            .WriteImage(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {
+                .sampler = albedo_sampler,
+                .imageView = resources.color_image->image_view,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            })
+            .WriteImage(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {
+                .sampler = metallic_roughness_sampler,
+                .imageView = resources.metallic_roughness_image->image_view,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            })
+            .Write(resources.descriptor_set);
+        m_material_data.push_back(std::move(resources));
+    }
+
+    //// ---- Load Meshes ---- ////
     std::vector<MeshVertex> vertices;
     std::vector<uint32_t> indices;
     for (const tinygltf::Mesh &mesh : model.meshes) {
@@ -113,6 +320,12 @@ void GLTFModel::Load(std::filesystem::path file_path) {
                 });
             }
 
+            new_primitive.material_descriptor_set = m_material_data[std::max(0, primitive.material)].descriptor_set;
+
+            // TODO: make it depend on whether this primitive is transparent or opaque
+            new_primitive.pipeline = m_core.opaque_pipeline;
+            new_primitive.pipeline_layout = m_core.opaque_pipeline_layout;
+
             new_mesh.primitives.push_back(new_primitive);
         }
 
@@ -125,5 +338,59 @@ void GLTFModel::Load(std::filesystem::path file_path) {
 void GLTFModel::CleanUp() {
     for (auto &mesh : m_meshes) {
         m_renderer.DestroyGPUMesh(mesh->mesh_buffers);
+    }
+
+    for (auto &sampler : m_samplers) {
+        vkDestroySampler(m_renderer.GetDevice(), sampler, nullptr);
+    }
+
+    for (auto &image : m_images) {
+        vmaDestroyImage(m_renderer.GetMemoryAllocator(), image->image, image->allocation);
+        vkDestroyImageView(m_renderer.GetDevice(), image->image_view, nullptr);
+    }
+
+    for (auto &resource : m_material_data) {
+        vmaDestroyBuffer(m_renderer.GetMemoryAllocator(), resource.uniform_buffer, resource.uniform_buffer_alloc);
+    }
+    m_descriptor_allocator->Destroy();
+}
+
+std::pair<VkFilter, VkSamplerMipmapMode> GLTFModel::GetVulkanTextureFilters(int gltf_filter) {
+    VkFilter filter = VK_FILTER_NEAREST;
+    VkSamplerMipmapMode mip_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+    switch (gltf_filter) {
+        case TINYGLTF_TEXTURE_FILTER_LINEAR:
+        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+            filter = VK_FILTER_LINEAR;
+            mip_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            break;
+        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+            filter = VK_FILTER_LINEAR;
+            mip_mode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            break;
+        case TINYGLTF_TEXTURE_FILTER_NEAREST:
+        case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+            filter = VK_FILTER_NEAREST;
+            mip_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            break;
+        case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+            filter = VK_FILTER_NEAREST;
+            mip_mode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            break;
+    }
+    return std::make_pair(filter, mip_mode);
+}
+
+VkSamplerAddressMode GLTFModel::GetVulkanAddressMode(int gltf_wrapping) {
+    switch (gltf_wrapping) {
+        case TINYGLTF_TEXTURE_WRAP_REPEAT:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+            return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        default:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
 }

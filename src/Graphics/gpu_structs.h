@@ -1,10 +1,31 @@
 #pragma once
 
-#include <vector>
 #include <volk.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 
+//// Image and Texture Data ////
+struct GPUImage {
+    VkImage image;
+    VkImageView image_view;
+    VmaAllocation allocation;
+    VkExtent3D extent;
+    VkFormat format;
+};
+
+struct GPUTexture {
+    GPUImage image;
+    VkSampler sampler;
+    VkDescriptorSet descriptor_set;
+};
+
+//// Buffer Data ////
+struct GPUBuffer {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+};
+
+//// Mesh Data ////
 // The UV being split ensures data ends on 16-byte alignments
 struct MeshVertex {
     glm::vec3 position;
@@ -13,10 +34,6 @@ struct MeshVertex {
     float uv_y;
     glm::vec4 color;
 };
-
-//////////////////////////
-//// --- GPU Data --- ////
-//////////////////////////
 
 struct GPUMesh {
     VkBuffer vertex_buffer;
@@ -27,11 +44,3 @@ struct GPUMesh {
 
     VkDeviceAddress device_address;
 };
-
-// class GltfMeshAsset {
-// public:
-// };
-
-//////////////////////////////////////
-//// --- CPU Data and Methods --- ////
-//////////////////////////////////////

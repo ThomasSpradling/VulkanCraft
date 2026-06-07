@@ -1,6 +1,7 @@
 #pragma once
 
-#include "mesh.h"
+#include "descriptor_allocator.h"
+#include "gpu_structs.h"
 #include "vulkan_renderer.h"
 #include <cstdint>
 #include <filesystem>
@@ -12,6 +13,10 @@
 struct MeshPrimitive {
     uint32_t start_index;
     uint32_t index_count;
+
+    VkDescriptorSet material_descriptor_set;
+    VkPipeline pipeline;
+    VkPipelineLayout pipeline_layout;
 };
 
 struct GLTFMeshAsset {
@@ -19,20 +24,55 @@ struct GLTFMeshAsset {
     GPUMesh mesh_buffers;
 };
 
+// Fixed data used by all GLTF instances
+struct GLTFCoreData {
+    VkPipeline opaque_pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout opaque_pipeline_layout = VK_NULL_HANDLE;
+
+    VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
+
+    GPUImage default_texture;
+    VkSampler default_sampler = VK_NULL_HANDLE;
+};
+
+struct GLTFMaterialData {
+    glm::vec4 color_factors;
+    glm::vec4 metallic_roughness_factors;
+    //padding
+    glm::vec4 extra[14];
+};
+
+struct GLTFMaterialResources {
+    VkDescriptorSet descriptor_set;
+
+    std::shared_ptr<GPUImage> color_image;
+    std::shared_ptr<GPUImage> metallic_roughness_image;
+
+    VkBuffer uniform_buffer;
+    VmaAllocation uniform_buffer_alloc;
+};
+
 class GLTFModel {
 public:
-    GLTFModel(const VulkanRenderer &renderer, std::filesystem::path file_path);
+    GLTFModel(const VulkanRenderer &renderer, const GLTFCoreData &core, std::filesystem::path file_path);
 
     void Load(std::filesystem::path file_path);
     void CleanUp();
     const std::vector<std::shared_ptr<GLTFMeshAsset>> &GetMeshes() const { return m_meshes; }
 private:
     const VulkanRenderer &m_renderer;
-    std::vector<std::shared_ptr<GLTFMeshAsset>> m_meshes;
-    // std::vector<MeshVertex> m_vertices;
-    // std::vector<uint32_t> m_indices;
+    const GLTFCoreData &m_core;
 
+    std::vector<std::shared_ptr<GLTFMeshAsset>> m_meshes;
+    std::vector<VkSampler> m_samplers;
+    std::vector<std::shared_ptr<GPUImage>> m_images;
+    std::vector<GLTFMaterialResources> m_material_data;
+
+    std::unique_ptr<DescriptorAllocator> m_descriptor_allocator;
 private:
+    std::pair<VkFilter, VkSamplerMipmapMode> GetVulkanTextureFilters(int gltf_filter);
+    VkSamplerAddressMode GetVulkanAddressMode(int gltf_wrapping);
+
     template <typename T>
     static T ReadScalar(const uint8_t *data, int component_type) {
         switch (component_type) {

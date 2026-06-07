@@ -1,7 +1,7 @@
 #pragma once
 
 #include "descriptor_allocator.h"
-#include "mesh.h"
+#include "gpu_structs.h"
 #include "utils.h"
 
 #include <GLFW/glfw3.h>
@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -45,6 +46,17 @@ struct Frame {
  */
 class VulkanRenderer {
 public:
+    struct DefaultSamplers {
+        VkSampler nearest;
+        VkSampler linear;
+    };
+
+    struct DefaultTextures {
+        std::shared_ptr<GPUImage> black;
+        std::shared_ptr<GPUImage> gray;
+        std::shared_ptr<GPUImage> checker;
+    };
+public:
     VulkanRenderer(GLFWwindow &window);
     ~VulkanRenderer();
 
@@ -74,6 +86,9 @@ public:
     VkFormat GetDepthOnlyFormat() { return m_image_formats.depth; }
     VkFormat GetHDRFormat() { return m_image_formats.hdr; }
 
+    const DefaultSamplers &GetDefaultSamplers() const { return m_default_samplers; }
+    const DefaultTextures &GetDefaultTextures() const { return m_default_textures; }
+
     void WriteDescriptorBuffer(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorBufferInfo descriptor_info, VkDescriptorType type);
     void WriteDescriptorImage(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorImageInfo descriptor_info, VkDescriptorType type);
 
@@ -84,10 +99,14 @@ public:
     
     // Cleans up mesh data. Does NOT guarantee data-hazard safety.
     void DestroyGPUMesh(const GPUMesh &mesh) const;
+
+    // Note: Requires target image to have usage `VK_IMAGE_USAGE_TRANSFER_DST_BIT`
+    void LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout = VK_IMAGE_LAYOUT_UNDEFINED) const;
 public:
     // Loads the data into a buffer that has already been allocated. Offsets and sizes are represented in bytes.
+    // Note: Requires target buffer to have usage `VK_IMAGE_USAGE_TRANSFER_DST_BIT`
     template <typename T>
-    void LoadBufferData(VkBuffer buffer, std::vector<T> data, size_t buffer_offset = 0, size_t data_offset = 0, size_t size = 0) const {
+    void LoadBufferData(VkBuffer buffer, const std::vector<T> &data, size_t buffer_offset = 0, size_t data_offset = 0, size_t size = 0) const {
         const size_t buffer_size = size == 0 ? sizeof(T) * data.size() : size;
         
         if (buffer == VK_NULL_HANDLE)
@@ -183,6 +202,9 @@ private:
 
     std::vector<PerFrameData> m_frame_data;
     uint32_t m_current_frame_index = 0; // Current frame in flight
+
+    DefaultSamplers m_default_samplers;
+    DefaultTextures m_default_textures;
 private:
     void InitVulkanInstance();
     void DestroyVulkanInstance();
@@ -197,9 +219,14 @@ private:
     void InitFrameData();
     void DestroyFrameData();
 
+    void InitDefaults();
+    void DestroyDefaults();
+
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
         VkDebugUtilsMessageTypeFlagsEXT message_type,
         const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
         void* user_data);
+
+    std::shared_ptr<GPUImage> CreateDefaultImage(VkExtent3D extent, VkFormat format);
 };

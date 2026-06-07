@@ -21,13 +21,14 @@ void VulkanCraft::Initialize() {
     m_event_handler->AddListener(this);
 
     m_frame_data.resize(m_renderer->SwapChainImageCount());
+
+    // Set up descriptor allocator
+    m_descriptor_allocator = std::make_unique<DescriptorAllocator>(m_renderer->GetDevice());
+
     InitRenderTargets();
     InitPipelines();
+    InitTextures();
     InitGeometry();
-
-    // auto text_handle = m_resource_manager->Load<TextResource>("hello_world");
-
-    // std::cout << text_handle.Get()->Contents() << std::endl;
 }
 
 void VulkanCraft::ShutDown() {
@@ -37,12 +38,10 @@ void VulkanCraft::ShutDown() {
     DestroyGeometry();
     DestroyPipelines();
     DestroyRenderTargets();
+    DestroyTextures();
 }
 
 void VulkanCraft::Update(float delta_time) {
-    // auto *text = m_resource_manager->GetResource<TextResource>("hello_world");
-    // std::cout << text->Contents() << std::endl;
-
     static float time = 0.0f;
     time += delta_time * 0.0005f;
 
@@ -52,9 +51,19 @@ void VulkanCraft::Update(float delta_time) {
         static_cast<float>(extent.width) /
         static_cast<float>(extent.height);
 
-    glm::mat4 view = glm::translate(
-        glm::mat4(1.0f),
-        glm::vec3(0.0f, 0.0f, -5.0f)
+    const float radius = 5.0f;
+
+    // glm::vec3 camera_pos = glm::vec3(
+    //     std::cos(time) * radius,
+    //     3.0f,
+    //     std::sin(time) * radius
+    // );
+    glm::vec3 camera_pos = glm::vec3(0.0f, 0.0f, 3.0f);
+
+    glm::mat4 view = glm::lookAt(
+        camera_pos,
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f)
     );
 
     glm::mat4 projection = glm::perspective(
@@ -63,25 +72,20 @@ void VulkanCraft::Update(float delta_time) {
         0.1f,
         100.0f
     );
+
     projection[1][1] *= -1.0f;
 
-    glm::vec3 spin_axis = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
-    glm::mat4 model = glm::rotate(
-        glm::mat4(1.0f),
-        time * glm::radians(90.0f),
-        glm::vec3(1.0f, 1.0f, 0.5f)
-    );
-
-    m_push_constants.view_projection = projection * view * model;
+    m_scene_data.view = view;
+    m_scene_data.projection = projection;
 }
 
 void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
     uint32_t i = m_renderer->GetCurrentFrameIndex();
 
     if (!frame.has_value()) {
-        m_frame_data.resize(m_renderer->SwapChainImageCount());
         // Window has been resized or modified
         DestroyRenderTargets();
+        m_frame_data.resize(m_renderer->SwapChainImageCount());
         InitRenderTargets();
         return;
     }
@@ -139,24 +143,19 @@ void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
         };
         vkCmdSetScissor(frame->cmd, 0, 1, &scissors);
     
-        // Bind graphics and draw
-        vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline);
-        vkCmdBindDescriptorSets(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_triangle_pipeline_layout, 0, 1, &m_frame_data[i].view_descriptor_set, 0, nullptr);
-        
-        VkDeviceSize offsets[] = { 0 };
-        
-        for (auto &mesh : m_model->GetMeshes()) {
-            // vkCmdBindVertexBuffers(frame->cmd, 0, 1, &mesh->mesh_buffers.vertex_buffer, offsets);
-            m_push_constants.vertex_buffer = mesh->mesh_buffers.device_address;
-            vkCmdPushConstants(frame->cmd, m_triangle_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &m_push_constants);
-            vkCmdBindIndexBuffer(frame->cmd, mesh->mesh_buffers.index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            
-            for (auto &primitive : mesh->primitives) {
-                vkCmdDrawIndexed(frame->cmd, primitive.index_count, 1, primitive.start_index, 0, 0);
-            }
-        }
+        for (auto &render_object : m_render_objects) {
+            vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_object.pipeline);
 
-        // vkCmdDraw(frame->cmd, 3, 1, 0, 0);
+            vkCmdBindDescriptorSets(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_object.pipeline_layout, 0, 1, &m_frame_data[i].global_descriptor_set, 0, nullptr);
+            vkCmdBindDescriptorSets(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_object.pipeline_layout, 1, 1, &render_object.material_descriptor_set, 0, nullptr);
+
+            m_push_constants.vertex_buffer = render_object.vertex_buffer;
+            m_push_constants.model = render_object.transform;
+
+            vkCmdPushConstants(frame->cmd, render_object.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &m_push_constants);
+            vkCmdBindIndexBuffer(frame->cmd, render_object.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(frame->cmd, render_object.index_count, 1, render_object.start_index, 0, 0);
+        }
     }
     vkCmdEndRendering(frame->cmd);
 }
@@ -219,7 +218,24 @@ void VulkanCraft::DestroyRenderTargets() {
 }
 
 void VulkanCraft::InitGeometry() {
-    m_model = std::make_shared<GLTFModel>(*m_renderer, RESOURCE_PATH "/models/cylinder.glb");
+    m_model = std::make_shared<GLTFModel>(*m_renderer, m_gltf_common_data, RESOURCE_PATH "/models/DamagedHelmet.glb");
+
+    for (auto &mesh : m_model->GetMeshes()) {
+        for (auto &primitive : mesh->primitives) {
+            m_render_objects.push_back({
+                .index_count = primitive.index_count,
+                .start_index = primitive.start_index,
+                .index_buffer = mesh->mesh_buffers.index_buffer,
+                .transform = glm::mat4(1.0f),
+                .vertex_buffer = mesh->mesh_buffers.device_address,
+
+                .pipeline = primitive.pipeline,
+                .pipeline_layout = primitive.pipeline_layout,
+
+                .material_descriptor_set = primitive.material_descriptor_set,
+            });
+        }
+    }
 }
 
 void VulkanCraft::DestroyGeometry() {
@@ -227,66 +243,75 @@ void VulkanCraft::DestroyGeometry() {
     m_model->CleanUp();
 }
 
+void VulkanCraft::InitTextures() {
+}
+
+void VulkanCraft::DestroyTextures() {
+}
+
 void VulkanCraft::InitPipelines() {
-    // Set up descriptor buffer
-    m_descriptor_allocator = std::make_unique<DescriptorAllocator>(m_renderer->GetDevice());
-    
+    //// ---- Initialize Global Descriptor Sets ---- ////
     std::vector<DescriptorPoolRatios> ratios {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }
     };
     m_descriptor_allocator->Init(10, ratios);
+    m_global_layout = DescriptorLayoutBuilder(m_renderer->GetDevice())
+        .AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .Build(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    // Create uniform buffers for view-projection matrix
-    {
-        const VkDeviceSize uniform_buffer_size = sizeof(UniformData);
-        m_view_uniform_layout = DescriptorLayoutBuilder(m_renderer->GetDevice())
-            .AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .Build(VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
-            m_frame_data[i].view_descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_view_uniform_layout);
-            
-            // Create uniform buffer
-            VkBufferCreateInfo buffer_create_info {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .pNext = nullptr,
-                .size = uniform_buffer_size,
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            };
-            VmaAllocationCreateInfo allocation_create_info {
-                .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-                .usage = VMA_MEMORY_USAGE_AUTO,
-            };
-            VK_CHECK(vmaCreateBuffer(m_renderer->GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &m_frame_data[i].view_uniform_buffer, &m_frame_data[i].view_uniform_allocation, nullptr));
-            
-            // Initialize uniform buffer
-            DescriptorWriter(m_renderer->GetDevice())
-                .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
-                    .buffer = m_frame_data[i].view_uniform_buffer,
-                    .offset = 0,
-                    .range = uniform_buffer_size,
-                })
-                .Write(m_frame_data[i].view_descriptor_set);
-        }
+    for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
+        m_frame_data[i].global_descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_global_layout);
+        
+        // Create uniform buffer
+        VkBufferCreateInfo buffer_create_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size = sizeof(SceneData),
+            .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo allocation_create_info {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VK_CHECK(vmaCreateBuffer(m_renderer->GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &m_frame_data[i].global_uniform_buffer, &m_frame_data[i].global_uniform_buffer_alloc, nullptr));
+        
+        // Attach uniform buffer to descriptor
+        DescriptorWriter(m_renderer->GetDevice())
+            .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
+                .buffer = m_frame_data[i].global_uniform_buffer,
+                .offset = 0,
+                .range = sizeof(SceneData),
+            })
+            .Write(m_frame_data[i].global_descriptor_set);
     }
     
+
+    //// ---- Initialize GLTF Material Descriptor Sets ---- ////
+    m_gltf_common_data.material_layout = DescriptorLayoutBuilder(m_renderer->GetDevice())
+        .AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .AddBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .Build(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    //// ---- Initialize GLTF Material Pipelines ---- ////
+
     VkPushConstantRange push_constant_data {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
         .size = sizeof(PushConstantData),
     };
-
-    VkShaderModule vertex_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/triangle.vert.spv");
-    VkShaderModule fragment_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/triangle.frag.spv");
+    VkShaderModule vertex_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/gltf/mesh.vert.spv");
+    VkShaderModule fragment_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/gltf/mesh.frag.spv");
 
     std::vector<VkDescriptorSetLayout> descriptor_set_layouts {
-        m_view_uniform_layout
+        m_global_layout,
+        m_gltf_common_data.material_layout,
     };
     std::vector<VkPushConstantRange> push_constant_ranges {
         push_constant_data
     };
-
     VkPipelineLayoutCreateInfo pipeline_layout_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
@@ -295,39 +320,31 @@ void VulkanCraft::InitPipelines() {
         .pushConstantRangeCount = static_cast<uint32_t>(push_constant_ranges.size()),
         .pPushConstantRanges = push_constant_ranges.data(),
     };
+    VK_CHECK(vkCreatePipelineLayout(m_renderer->GetDevice(), &pipeline_layout_create_info, nullptr, &m_gltf_common_data.opaque_pipeline_layout));
 
-    VK_CHECK(vkCreatePipelineLayout(m_renderer->GetDevice(), &pipeline_layout_create_info, nullptr, &m_triangle_pipeline_layout))
-
-    m_triangle_pipeline = PipelineBuilder_Graphics(m_renderer->GetDevice(), m_triangle_pipeline_layout)
-        // .AddBinding(0, sizeof(MeshVertex))
-        // .AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position))
-        // .AddAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal))
-        // .AddAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color))
-        // .AddAttribute(3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv))
-    
+    m_gltf_common_data.opaque_pipeline = PipelineBuilder_Graphics(m_renderer->GetDevice(), m_gltf_common_data.opaque_pipeline_layout)
         .AddColorAttachmentFormat(m_renderer->GetColorFormat())
         .SetDepthAttachmentFormat(m_renderer->GetDepthOnlyFormat())
-        .EnableDepthTest()
-        // .EnableBlendingAlpha()
-        
+        .EnableDepthTest()        
         .AddShaderStage(VK_SHADER_STAGE_VERTEX_BIT, vertex_shader_module)
         .AddShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, fragment_shader_module)
         .Build();
-        
+
     vkDestroyShaderModule(m_renderer->GetDevice(), vertex_shader_module, nullptr);
     vkDestroyShaderModule(m_renderer->GetDevice(), fragment_shader_module, nullptr);
 }
 
 void VulkanCraft::DestroyPipelines() {
-    vkDestroyPipeline(m_renderer->GetDevice(), m_triangle_pipeline, nullptr);
-    vkDestroyPipelineLayout(m_renderer->GetDevice(), m_triangle_pipeline_layout, nullptr);
+    vkDestroyPipeline(m_renderer->GetDevice(), m_gltf_common_data.opaque_pipeline, nullptr);
+    vkDestroyPipelineLayout(m_renderer->GetDevice(), m_gltf_common_data.opaque_pipeline_layout, nullptr);
 
     for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
-        vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_frame_data[i].view_uniform_buffer, m_frame_data[i].view_uniform_allocation);
+        vmaDestroyBuffer(m_renderer->GetMemoryAllocator(), m_frame_data[i].global_uniform_buffer, m_frame_data[i].global_uniform_buffer_alloc);
     }
     m_descriptor_allocator->Destroy();
     
-    vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_view_uniform_layout, nullptr);
+    vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_global_layout, nullptr);
+    vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_gltf_common_data.material_layout, nullptr);
 }
 
 void VulkanCraft::UpdateUniforms() {
@@ -335,8 +352,12 @@ void VulkanCraft::UpdateUniforms() {
 
     // Map GPU memory onto CPU and edit it
     VmaAllocationInfo allocation_info;
-    vmaGetAllocationInfo(m_renderer->GetMemoryAllocator(), m_frame_data[i].view_uniform_allocation, &allocation_info);
-    UniformData *color_uniform = static_cast<UniformData *>(allocation_info.pMappedData);
-
-    color_uniform->color = m_current_color;
+    vmaGetAllocationInfo(m_renderer->GetMemoryAllocator(), m_frame_data[i].global_uniform_buffer_alloc, &allocation_info);
+    SceneData *device_scene_data = static_cast<SceneData *>(allocation_info.pMappedData);
+    device_scene_data->ambient_color = glm::vec4(0.01f);
+    device_scene_data->sunlight_color = glm::vec4(1.0f);
+    device_scene_data->sunlight_direction = glm::vec4(1.0f, -1.0f, 0.0f, 3.0f);
+    device_scene_data->projection = m_scene_data.projection;
+    device_scene_data->view = m_scene_data.view;
+    device_scene_data->view_projection = m_scene_data.projection * m_scene_data.view;
 }

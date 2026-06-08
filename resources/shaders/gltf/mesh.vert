@@ -6,7 +6,7 @@
 #include "common.glsl"
 
 layout(location = 0) out vec3 v_normal;
-layout(location = 1) out vec3 v_color;
+layout(location = 1) out vec4 v_color;
 layout(location = 2) out vec2 v_uv;
 
 struct Vertex {
@@ -32,8 +32,10 @@ void main() {
 
     gl_Position = u_scene_data.view_projection * u_model_matrix * position;
     
-    v_normal = (u_model_matrix * vec4(v.normal, 0.0)).xyz;
-    v_color = v.color.xyz * u_material_data.color_factors.xyz;
+    mat3 normal_matrix = transpose(inverse(mat3(u_model_matrix)));
+    v_normal = normalize(normal_matrix * v.normal);
+
+    v_color = v.color * u_material_data.color_factors;
     v_uv.x = v.uv_x;
     v_uv.y = v.uv_y;
 }

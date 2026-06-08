@@ -55,7 +55,7 @@ std::optional<Frame> VulkanRenderer::BeginFrame() {
 
     // Wait for `render_fence`, which was signaled by previous frames queue submission.
     // TODO: Remove magic number
-    vkWaitForFences(m_device, 1, &current_frame.render_fence, VK_TRUE, 1'000'000);
+    vkWaitForFences(m_device, 1, &current_frame.render_fence, VK_TRUE, 1'000'000'000);
     vkResetFences(m_device, 1, &current_frame.render_fence);
 
     vkResetCommandPool(m_device, current_frame.graphics_command_pool, 0);
@@ -65,7 +65,7 @@ std::optional<Frame> VulkanRenderer::BeginFrame() {
     VkResult result = vkAcquireNextImageKHR(
         m_device,
         m_swapchain,
-        1'000'000,
+        1'000'000'000,
         current_frame.swapchain_acquire_semaphore,
         VK_NULL_HANDLE,
         &image_index
@@ -1098,12 +1098,13 @@ void VulkanRenderer::InitDefaults() {
 
     uint32_t gray = glm::packUnorm4x8(glm::vec4(0.65f, 0.65f, 0.65f, 1.0f));
     uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
+    uint32_t white = glm::packUnorm4x8(glm::vec4(0));
     uint32_t black = glm::packUnorm4x8(glm::vec4(0));
 
     // Default black material
     {
-        m_default_textures.black = CreateDefaultImage(VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM);
-        LoadImageData(*m_default_textures.black, (void *) &black, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_default_textures.white = CreateDefaultImage(VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM);
+        LoadImageData(*m_default_textures.white, (void *) &white, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     // Default gray material
@@ -1129,8 +1130,8 @@ void VulkanRenderer::DestroyDefaults() {
     vkDestroySampler(m_device, m_default_samplers.nearest, nullptr);
     vkDestroySampler(m_device, m_default_samplers.linear, nullptr);
     
-    vkDestroyImageView(m_device, m_default_textures.black->image_view, nullptr);
-    vmaDestroyImage(m_allocator, m_default_textures.black->image, m_default_textures.black->allocation);
+    vkDestroyImageView(m_device, m_default_textures.white->image_view, nullptr);
+    vmaDestroyImage(m_allocator, m_default_textures.white->image, m_default_textures.white->allocation);
 
     vkDestroyImageView(m_device, m_default_textures.gray->image_view, nullptr);
     vmaDestroyImage(m_allocator, m_default_textures.gray->image, m_default_textures.gray->allocation);

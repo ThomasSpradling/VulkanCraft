@@ -2,6 +2,10 @@
 #include "../errors.h"
 #include "descriptor_allocator.h"
 #include "descriptor_writer.h"
+#include "renderable.h"
+
+#define GLM_ENABLE_EXPERIMENTAL 
+#include <glm/gtx/quaternion.hpp>
 #include <glm/ext/vector_float4.hpp>
 #include <iostream>
 #include <tuple>
@@ -63,8 +67,8 @@ void GLTFModel::Load(std::filesystem::path file_path) {
         auto [mag_filter, mipmap_mode2] = GetVulkanTextureFilters(sampler.magFilter);
         VkSamplerCreateInfo sampler_create_info {
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = min_filter,
-            .minFilter = mag_filter,
+            .magFilter = mag_filter,
+            .minFilter = min_filter,
             .mipmapMode = mipmap_mode1,
             .addressModeU = GetVulkanAddressMode(sampler.wrapS),
             .addressModeV = GetVulkanAddressMode(sampler.wrapT),
@@ -122,7 +126,9 @@ void GLTFModel::Load(std::filesystem::path file_path) {
     if (model.materials.empty()) {
         // Create a single default material
 
-        GLTFMaterialResources resources;
+        GLTFMaterialResources resources {
+            .pass = MaterialPass::Opaque,
+        };
         resources.descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_core.material_layout);
 
         // Create uniform buffer
@@ -149,7 +155,7 @@ void GLTFModel::Load(std::filesystem::path file_path) {
 
         // Create Metallic Roughness Image
         VkSampler metallic_roughness_sampler = m_renderer.GetDefaultSamplers().nearest;
-        resources.metallic_roughness_image = m_renderer.GetDefaultTextures().black;
+        resources.metallic_roughness_image = m_renderer.GetDefaultTextures().white;
 
         DescriptorWriter(m_renderer.GetDevice())
             .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
@@ -174,6 +180,11 @@ void GLTFModel::Load(std::filesystem::path file_path) {
     for (const tinygltf::Material &material : model.materials) {
         // TODO: Better error detection
         GLTFMaterialResources resources;
+        if (material.alphaMode == "BLEND") {
+            resources.pass = MaterialPass::Transparent;
+        } else {
+            resources.pass = MaterialPass::Opaque;
+        }
 
         // Allocate a descriptor set and write all these material data to it.
         resources.descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_core.material_layout);
@@ -204,26 +215,34 @@ void GLTFModel::Load(std::filesystem::path file_path) {
         VkSampler albedo_sampler;
         int color_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
         if (color_texture_index > -1) {
-            tinygltf::Texture &albedo_texture = model.textures[material.pbrMetallicRoughness.baseColorTexture.index];
-            albedo_sampler = m_samplers[albedo_texture.sampler];
-            resources.color_image = m_images[albedo_texture.source];
+            tinygltf::Texture &albedo_texture = model.textures[color_texture_index];
+            albedo_sampler = albedo_texture.sampler > -1
+                ? m_samplers[albedo_texture.sampler]
+                : m_renderer.GetDefaultSamplers().nearest;
+            resources.color_image = albedo_texture.source > -1 
+                ? m_images[albedo_texture.source]
+                : m_renderer.GetDefaultTextures().gray;
         } else {
             std::cerr << "WARNING: Missing Color Image\n";
             albedo_sampler = m_renderer.GetDefaultSamplers().nearest;
-            resources.color_image = m_renderer.GetDefaultTextures().checker;
+            resources.color_image = m_renderer.GetDefaultTextures().gray;
         }
 
         // Find metallic roughness image
         VkSampler metallic_roughness_sampler;
-        int metallic_roughness_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
+        int metallic_roughness_texture_index = material.pbrMetallicRoughness.metallicRoughnessTexture.index;
         if (metallic_roughness_texture_index > -1) {
-            tinygltf::Texture &metallic_roughness_texture = model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
-            metallic_roughness_sampler = m_samplers[metallic_roughness_texture.sampler];
-            resources.metallic_roughness_image = m_images[metallic_roughness_texture.source];
+            tinygltf::Texture &metallic_roughness_texture = model.textures[metallic_roughness_texture_index];
+            metallic_roughness_sampler = metallic_roughness_texture.sampler > -1 
+                ? m_samplers[metallic_roughness_texture.sampler]
+                : m_renderer.GetDefaultSamplers().nearest;
+            resources.metallic_roughness_image = metallic_roughness_texture.source > -1
+                ? m_images[metallic_roughness_texture.source]
+                : m_renderer.GetDefaultTextures().white;
         } else {
-            std::cerr << "WARNING: Missing Metallic Roughness Image\n";
+            // std::cerr << "WARNING: Missing Metallic Roughness Image\n";
             metallic_roughness_sampler = m_renderer.GetDefaultSamplers().nearest;
-            resources.metallic_roughness_image = m_renderer.GetDefaultTextures().black;
+            resources.metallic_roughness_image = m_renderer.GetDefaultTextures().white;
         }
 
         DescriptorWriter(m_renderer.GetDevice())
@@ -321,10 +340,16 @@ void GLTFModel::Load(std::filesystem::path file_path) {
             }
 
             new_primitive.material_descriptor_set = m_material_data[std::max(0, primitive.material)].descriptor_set;
+            new_primitive.pass = m_material_data[std::max(0, primitive.material)].pass;
 
             // TODO: make it depend on whether this primitive is transparent or opaque
-            new_primitive.pipeline = m_core.opaque_pipeline;
-            new_primitive.pipeline_layout = m_core.opaque_pipeline_layout;
+            if (new_primitive.pass == MaterialPass::Opaque) {
+                new_primitive.pipeline = m_core.opaque_pipeline;
+                new_primitive.pipeline_layout = m_core.opaque_pipeline_layout;
+            } else if (new_primitive.pass == MaterialPass::Transparent) {
+                new_primitive.pipeline = m_core.transparent_pipeline;
+                new_primitive.pipeline_layout = m_core.transparent_pipeline_layout;
+            }
 
             new_mesh.primitives.push_back(new_primitive);
         }
@@ -332,6 +357,14 @@ void GLTFModel::Load(std::filesystem::path file_path) {
         // Upload to GPU
         new_mesh.mesh_buffers = m_renderer.UploadGPUMesh(vertices, indices);
         m_meshes.emplace_back(std::make_shared<GLTFMeshAsset>(std::move(new_mesh)));
+    }
+
+    //// ---- Load Nodes ---- ////
+    for (uint32_t i = 0; i < scene.nodes.size(); ++i) {
+        tinygltf::Node &root_node = model.nodes[scene.nodes[i]];
+        std::shared_ptr<GLTFSceneNode> root_scene_node = std::make_shared<GLTFSceneNode>();
+        m_nodes.push_back(root_scene_node);
+        LoadNode(model, root_node, m_nodes.back());
     }
 }
 
@@ -345,14 +378,109 @@ void GLTFModel::CleanUp() {
     }
 
     for (auto &image : m_images) {
-        vmaDestroyImage(m_renderer.GetMemoryAllocator(), image->image, image->allocation);
         vkDestroyImageView(m_renderer.GetDevice(), image->image_view, nullptr);
+        vmaDestroyImage(m_renderer.GetMemoryAllocator(), image->image, image->allocation);
     }
 
     for (auto &resource : m_material_data) {
         vmaDestroyBuffer(m_renderer.GetMemoryAllocator(), resource.uniform_buffer, resource.uniform_buffer_alloc);
     }
     m_descriptor_allocator->Destroy();
+}
+
+void GLTFModel::Draw(DrawContext &context) {
+    // for each node:
+        // draw_node
+
+    for (auto &node : m_nodes) {
+        // node->world_transform
+        if (node->mesh == nullptr)
+            continue;
+
+        for (auto &primitive : node->mesh->primitives) {
+            RenderObject render_object {
+                .index_count = primitive.index_count,
+                .start_index = primitive.start_index,
+                .index_buffer = node->mesh->mesh_buffers.index_buffer,
+                .transform = node->world_transform,
+                .vertex_buffer = node->mesh->mesh_buffers.device_address,
+
+                .pipeline = primitive.pipeline,
+                .pipeline_layout = primitive.pipeline_layout,
+
+                .descriptor_set = primitive.material_descriptor_set,
+            };
+
+            if (primitive.pass == MaterialPass::Opaque)
+                context.opaque_objects.push_back(std::move(render_object));
+            else if (primitive.pass == MaterialPass::Transparent)
+                context.transparent_objects.push_back(std::move(render_object));
+        }
+    }
+
+    // for (auto &mesh : m_meshes) {
+    //     for (auto &primitive : mesh->primitives) {
+    //         context.render_objects.push_back({
+    //             .index_count = primitive.index_count,
+    //             .start_index = primitive.start_index,
+    //             .index_buffer = mesh->mesh_buffers.index_buffer,
+    //             .transform = glm::mat4(1.0f),
+    //             .vertex_buffer = mesh->mesh_buffers.device_address,
+
+    //             .pipeline = primitive.pipeline,
+    //             .pipeline_layout = primitive.pipeline_layout,
+
+    //             .descriptor_set = primitive.material_descriptor_set,
+    //         });
+    //     }
+    // }
+}
+
+void GLTFModel::LoadNode(const tinygltf::Model &model, const tinygltf::Node &node, std::shared_ptr<GLTFSceneNode> scene_node) {
+    scene_node->local_transform = GetNodeTransform(node);
+    std::shared_ptr<GLTFSceneNode> parent = scene_node->parent.lock();
+    scene_node->world_transform = parent
+        ? parent->world_transform * scene_node->local_transform
+        : scene_node->local_transform;
+
+    if (node.mesh != -1) {
+        scene_node->mesh = m_meshes[node.mesh];
+    }
+
+    // create new node and connect children and transforms
+    for (uint32_t i = 0; i < node.children.size(); ++i) {
+        std::shared_ptr<GLTFSceneNode> child = std::make_shared<GLTFSceneNode>();
+        child->parent = scene_node;
+        scene_node->children.push_back(child);
+        m_nodes.push_back(child);
+        LoadNode(model, model.nodes[node.children[i]], child);
+    }
+}
+
+glm::mat4 GLTFModel::GetNodeTransform(const tinygltf::Node &node) {
+    glm::vec3 translation_vector = glm::vec3(0.0f);
+    if (node.translation.size())
+        translation_vector = glm::make_vec3(node.translation.data());
+
+    glm::vec3 scale_vector = glm::vec3(1.0f);
+    if (node.scale.size())
+        scale_vector = glm::make_vec3(node.scale.data());
+
+    glm::quat rotation_quaternion = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    if (node.rotation.size()) {
+        glm::vec4 rotation_vector = glm::make_vec4(node.rotation.data());
+        rotation_quaternion = glm::quat(rotation_vector.w, rotation_vector.x, rotation_vector.y, rotation_vector.z);
+    }
+
+    glm::mat4 translation = glm::translate(glm::mat4(1.0f), translation_vector);
+    glm::mat4 scale = glm::scale(glm::mat4(1.0f), scale_vector);
+    glm::mat4 rotation = glm::toMat4(rotation_quaternion);
+
+    glm::mat4 transform = glm::mat4(1.0f);
+    if (node.matrix.size())
+        transform = glm::make_mat4(node.matrix.data());
+
+    return translation * rotation * scale * transform;
 }
 
 std::pair<VkFilter, VkSamplerMipmapMode> GLTFModel::GetVulkanTextureFilters(int gltf_filter) {

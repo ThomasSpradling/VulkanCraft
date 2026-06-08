@@ -19,7 +19,7 @@
 struct RenderProperties {
     const uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
 
-    bool enable_validation = true;
+    bool enable_validation = false;
 
     VkExtent2D window_extent;
     bool enable_vsync = false;
@@ -52,7 +52,7 @@ public:
     };
 
     struct DefaultTextures {
-        std::shared_ptr<GPUImage> black;
+        std::shared_ptr<GPUImage> white;
         std::shared_ptr<GPUImage> gray;
         std::shared_ptr<GPUImage> checker;
     };

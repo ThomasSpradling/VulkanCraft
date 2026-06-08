@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include "../Graphics/gltf_model.h"
+#include "../Graphics/renderable.h"
 
 struct SceneData {
     glm::mat4 view;
@@ -38,22 +39,6 @@ private:
         glm::mat4 model;
         VkDeviceAddress vertex_buffer;
     };
-
-    struct RenderObject {
-        uint32_t index_count;
-        uint32_t start_index;
-        VkBuffer index_buffer;
-
-        glm::mat4 transform;
-        VkDeviceAddress vertex_buffer;
-
-        // Pipeline
-        VkPipeline pipeline;
-        VkPipelineLayout pipeline_layout;
-
-        // Material
-        VkDescriptorSet material_descriptor_set;
-    };
 private:
     // Temporary for input testing
     glm::vec3 m_current_color = { 164.0f/256.0f, 30.0f/256.0f, 34.0f/256.0f };
@@ -70,7 +55,8 @@ private:
     std::vector<PerFrameData> m_frame_data;
     SceneData m_scene_data;
 
-    std::vector<RenderObject> m_render_objects;
+    DrawContext m_draw_context;
+    // std::vector<RenderObject> m_render_objects;
 private:
     void InitRenderTargets();
     void DestroyRenderTargets();

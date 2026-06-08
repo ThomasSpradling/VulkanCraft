@@ -2,9 +2,11 @@
 
 #include "descriptor_allocator.h"
 #include "gpu_structs.h"
+#include "renderable.h"
 #include "vulkan_renderer.h"
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -17,6 +19,8 @@ struct MeshPrimitive {
     VkDescriptorSet material_descriptor_set;
     VkPipeline pipeline;
     VkPipelineLayout pipeline_layout;
+
+    MaterialPass pass;
 };
 
 struct GLTFMeshAsset {
@@ -28,6 +32,9 @@ struct GLTFMeshAsset {
 struct GLTFCoreData {
     VkPipeline opaque_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout opaque_pipeline_layout = VK_NULL_HANDLE;
+    
+    VkPipeline transparent_pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout transparent_pipeline_layout = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout material_layout = VK_NULL_HANDLE;
 
@@ -50,15 +57,28 @@ struct GLTFMaterialResources {
 
     VkBuffer uniform_buffer;
     VmaAllocation uniform_buffer_alloc;
+    MaterialPass pass;
 };
 
-class GLTFModel {
+struct GLTFSceneNode {
+    std::shared_ptr<GLTFMeshAsset> mesh = nullptr;
+
+    std::weak_ptr<GLTFSceneNode> parent;
+    std::vector<std::shared_ptr<GLTFSceneNode>> children;
+
+    glm::mat4 local_transform;
+    glm::mat4 world_transform;
+};
+
+class GLTFModel : public IRenderable {
 public:
     GLTFModel(const VulkanRenderer &renderer, const GLTFCoreData &core, std::filesystem::path file_path);
 
     void Load(std::filesystem::path file_path);
     void CleanUp();
     const std::vector<std::shared_ptr<GLTFMeshAsset>> &GetMeshes() const { return m_meshes; }
+
+    virtual void Draw(DrawContext &context) override;
 private:
     const VulkanRenderer &m_renderer;
     const GLTFCoreData &m_core;
@@ -68,8 +88,14 @@ private:
     std::vector<std::shared_ptr<GPUImage>> m_images;
     std::vector<GLTFMaterialResources> m_material_data;
 
+    // Note: May not match the same order as tinygltf nodes in-file!
+    std::vector<std::shared_ptr<GLTFSceneNode>> m_nodes;
+
     std::unique_ptr<DescriptorAllocator> m_descriptor_allocator;
 private:
+    void LoadNode(const tinygltf::Model &model, const tinygltf::Node &node, std::shared_ptr<GLTFSceneNode> scene_node);
+
+    glm::mat4 GetNodeTransform(const tinygltf::Node &node);
     std::pair<VkFilter, VkSamplerMipmapMode> GetVulkanTextureFilters(int gltf_filter);
     VkSamplerAddressMode GetVulkanAddressMode(int gltf_wrapping);
 

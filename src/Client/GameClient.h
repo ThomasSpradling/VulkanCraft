@@ -67,7 +67,7 @@ private:
     std::unique_ptr<ChunkRenderer> m_chunk_renderer;
 
     double m_network_send_timer = 0.0;
-    const int NETWORK_INPUT_SEND_RATE = 10; // Hz
+    const int NETWORK_INPUT_SEND_RATE = 60; // Hz
 
     SOCKET m_socket;
     addrinfo m_server_addrinfo;

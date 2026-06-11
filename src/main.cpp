@@ -1,16 +1,23 @@
 #include <cstdio>
 #include <iostream>
-#include "application.h"
+#include "Application/Application.h"
 #include <GLFW/glfw3.h>
 #include <memory>
 #include <stdexcept>
 
-#include "VulkanCraft/vulkan_craft.h"
+#include "Client/GameClient.h"
+#include "Server/GameServer.h"
 
 int main(int argc, char *argv[]) {
+    if (argc >= 2 && std::strcmp(argv[1], "--server") == 0) {
+        std::cout << "Server starting!\n";
+        GameServer game_server{};
+        game_server.Run();
+        return 0;
+    }
+
     try {
-        // ConsoleGame game;
-        std::shared_ptr<Game> game = std::make_shared<VulkanCraft>();
+        std::shared_ptr<IGame> game = std::make_shared<GameClient>();
         Application app{game};
         app.Run();
     } catch (const std::runtime_error &error) {

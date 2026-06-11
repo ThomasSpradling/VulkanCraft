@@ -1,6 +1,6 @@
 #pragma once
 
-#include "descriptor_allocator.h"
+#include "DescriptorAllocator.h"
 #include "gpu_structs.h"
 #include "utils.h"
 
@@ -81,10 +81,10 @@ public:
     
     VkExtent2D DrawExtent() const { return m_swapchain_extent; }
     
-    VkFormat GetColorFormat() { return m_image_formats.color; }
-    VkFormat GetDepthStencilFormat() { return m_image_formats.depth_stencil; }
-    VkFormat GetDepthOnlyFormat() { return m_image_formats.depth; }
-    VkFormat GetHDRFormat() { return m_image_formats.hdr; }
+    VkFormat GetColorFormat() const { return m_image_formats.color; }
+    VkFormat GetDepthStencilFormat() const { return m_image_formats.depth_stencil; }
+    VkFormat GetDepthOnlyFormat() const { return m_image_formats.depth; }
+    VkFormat GetHDRFormat() const { return m_image_formats.hdr; }
 
     const DefaultSamplers &GetDefaultSamplers() const { return m_default_samplers; }
     const DefaultTextures &GetDefaultTextures() const { return m_default_textures; }
@@ -92,10 +92,69 @@ public:
     void WriteDescriptorBuffer(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorBufferInfo descriptor_info, VkDescriptorType type);
     void WriteDescriptorImage(uint32_t binding, VkDescriptorSet descriptor_set, VkDescriptorImageInfo descriptor_info, VkDescriptorType type);
 
-    VkShaderModule LoadShader(const std::string &file_path);
+    VkShaderModule LoadShader(const std::string &file_path) const;
 
     // Upload CPU mesh data to GPU buffers. The buffers MUST then be managed by the caller.
-    GPUMesh UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const;
+    // GPUMesh UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const;
+
+    template<typename T>
+    GPUMesh UploadGPUMesh(const std::vector<T> &vertices, const std::vector<uint32_t> &indices) const {
+        // TODO: The below simply uses two staging buffers, one for each buffer. Rewrite to use just one staging buffer.
+        
+        VkBuffer vertex_buffer;
+        VmaAllocation vertex_buffer_alloc;
+
+        VkBuffer index_buffer;
+        VmaAllocation index_buffer_alloc;
+
+        {
+            VkBufferCreateInfo buffer_create_info {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .size = vertices.size() * sizeof(T),
+                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                // .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            };
+            VmaAllocationCreateInfo allocation_create_info {
+                .flags = 0,
+                .usage = VMA_MEMORY_USAGE_AUTO,
+            };
+            VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &vertex_buffer, &vertex_buffer_alloc, nullptr));
+            LoadBufferData(vertex_buffer, vertices);
+        }
+        
+        // Create index buffer
+        {
+            VkBufferCreateInfo buffer_create_info {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .size = indices.size() * sizeof(uint32_t),
+                .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            };
+            VmaAllocationCreateInfo allocation_create_info {
+                .flags = 0,
+                .usage = VMA_MEMORY_USAGE_AUTO,
+            };
+            VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &index_buffer, &index_buffer_alloc, nullptr));
+            LoadBufferData(index_buffer, indices);
+        }
+
+        VkBufferDeviceAddressInfo buffer_device_address_info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = vertex_buffer,
+        };
+        VkDeviceAddress address = vkGetBufferDeviceAddress(m_device, &buffer_device_address_info);
+
+        return GPUMesh {
+            .vertex_buffer = vertex_buffer,
+            .vertex_buffer_alloc = vertex_buffer_alloc,
+            .index_buffer = index_buffer,
+            .index_buffer_alloc = index_buffer_alloc,
+            .device_address = address
+        };
+    }
     
     // Cleans up mesh data. Does NOT guarantee data-hazard safety.
     void DestroyGPUMesh(const GPUMesh &mesh) const;

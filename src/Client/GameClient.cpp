@@ -1,26 +1,31 @@
 #include "../Graphics/utils.h"
+#include <array>
+#include <optional>
+#include <variant>
 
 // #include "../backend/resource_manager/text_resource.h"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/transform.hpp>
 
-#include "../Events/WindowEvents/key_events.h"
-#include "../Events/WindowEvents/mouse_events.h"
-#include "../Events/event_dispatcher.h"
-#include "../Graphics/descriptor_layout_builder.h"
-#include "../Graphics/descriptor_writer.h"
+#include "../Events/WindowEvents/KeyEvents.h"
+#include "../Events/WindowEvents/MouseEvents.h"
+#include "../Events/EventDispatcher.h"
+#include "../Graphics/DescriptorLayoutBuilder.h"
+#include "../Graphics/DescriptorWriter.h"
 
-#include "../Graphics/pipeline_builder.h"
+#include "../Network/Packets.h"
+
+#include "../Graphics/PipelineBuilder.h"
 #include <vulkan/vulkan_core.h>
-#include "vulkan_craft.h"
+#include "GameClient.h"
 #include <iostream>
 #include <vector>
 
-void VulkanCraft::Initialize() {
+void GameClient::Initialize() {
     std::cout << "Game initialized!" << std::endl;
-    m_event_handler->AddListener(this);
-
     m_frame_data.resize(m_renderer->SwapChainImageCount());
+
+    // Graphics
 
     // Set up descriptor allocator
     m_descriptor_allocator = std::make_unique<DescriptorAllocator>(m_renderer->GetDevice());
@@ -29,11 +34,15 @@ void VulkanCraft::Initialize() {
     InitPipelines();
     InitTextures();
     InitGeometry();
+
+    // m_player = std::make_unique<Player>();
+
+    // Networks
+    InitClientSocket();
 }
 
-void VulkanCraft::ShutDown() {
+void GameClient::ShutDown() {
     std::cout << "Game shutting down!" << std::endl;
-    m_event_handler->RemoveListener(this);
 
     DestroyGeometry();
     DestroyPipelines();
@@ -41,9 +50,15 @@ void VulkanCraft::ShutDown() {
     DestroyTextures();
 }
 
-void VulkanCraft::Update(float delta_time) {
-    static float time = 0.0f;
-    time += delta_time * 0.0005f;
+void GameClient::Update(float delta_time) {
+    //// Receive packets from server ////
+    ReceiveNetworkPackets();
+    
+    m_network_send_timer += delta_time;
+    if (m_network_send_timer >= 1000.0f / NETWORK_INPUT_SEND_RATE) {
+        m_network_send_timer = 0.0;
+        SendNetworkPackets();
+    }
 
     const auto extent = m_renderer->DrawExtent();
 
@@ -51,35 +66,34 @@ void VulkanCraft::Update(float delta_time) {
         static_cast<float>(extent.width) /
         static_cast<float>(extent.height);
 
-    const float radius = 5.0f;
-
-    glm::vec3 camera_pos = glm::vec3(
-        -std::sin(time) * radius,
-        0.0f,
-        std::cos(time) * radius
-    );
-    // glm::vec3 camera_pos = glm::vec3(0.0f, 0.0f, +5.0f);
-
-    glm::mat4 view = glm::lookAt(
-        camera_pos,
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f)
-    );
-
     glm::mat4 projection = glm::perspective(
         glm::radians(60.0f),
         aspect,
         0.1f,
         10000.0f
     );
-
     projection[1][1] *= -1.0f;
+
+    glm::vec3 direction;
+    direction.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+    direction.y = sin(glm::radians(m_pitch));
+    direction.z = -sin(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+
+    glm::vec3 front = glm::normalize(direction);
+    glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+    glm::vec3 up = glm::normalize(glm::cross(right, front));
+
+    glm::mat4 view = glm::lookAt(
+        m_current_position - front,
+        m_current_position,
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    );
 
     m_scene_data.view = view;
     m_scene_data.projection = projection;
 }
 
-void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
+void GameClient::Render(std::optional<Frame> frame, float delta_time) {
     uint32_t i = m_renderer->GetCurrentFrameIndex();
 
     if (!frame.has_value()) {
@@ -146,7 +160,11 @@ void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
             .extent = frame->extent
         };
         vkCmdSetScissor(frame->cmd, 0, 1, &scissors);
+
+        // Draw Chunks
+        m_chunk_renderer->Draw(frame->cmd, m_frame_data[i].global_descriptor_set);
     
+        // Draw GLTF Objects
         auto draw = [&](const RenderObject &render_object) {
             vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_object.pipeline);
 
@@ -171,17 +189,7 @@ void VulkanCraft::Render(std::optional<Frame> frame, float delta_time) {
     vkCmdEndRendering(frame->cmd);
 }
 
-void VulkanCraft::OnEvent(const Event &event) {
-    EventDispatcher dispatcher(event);
-
-    dispatcher.Dispatch<MouseMovedEvent>([this](const MouseMovedEvent &e) {
-        glm::vec2 screen_size = m_application->GetWindowSize();
-        glm::vec2 color = (e.GetMousePosition() / screen_size);
-        m_current_color = { color.r, color.g, 0.0f };
-    });
-}
-
-void VulkanCraft::InitRenderTargets() {
+void GameClient::InitRenderTargets() {
     // Depth Buffer
 
     for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
@@ -221,29 +229,29 @@ void VulkanCraft::InitRenderTargets() {
     }
 }
 
-void VulkanCraft::DestroyRenderTargets() {
+void GameClient::DestroyRenderTargets() {
     for (uint32_t i = 0; i < m_frame_data.size(); ++i) {
         vkDestroyImageView(m_renderer->GetDevice(), m_frame_data[i].depth_image_view, nullptr);
         vmaDestroyImage(m_renderer->GetMemoryAllocator(), m_frame_data[i].depth_image, m_frame_data[i].depth_image_alloc);
     }
 }
 
-void VulkanCraft::InitGeometry() {
+void GameClient::InitGeometry() {
     m_model = std::make_shared<GLTFModel>(*m_renderer, m_gltf_common_data, RESOURCE_PATH "/models/DamagedHelmet.glb");
 }
 
-void VulkanCraft::DestroyGeometry() {
+void GameClient::DestroyGeometry() {
     // m_renderer->DestroyGPUMesh(m_mesh);
     m_model->CleanUp();
 }
 
-void VulkanCraft::InitTextures() {
+void GameClient::InitTextures() {
 }
 
-void VulkanCraft::DestroyTextures() {
+void GameClient::DestroyTextures() {
 }
 
-void VulkanCraft::InitPipelines() {
+void GameClient::InitPipelines() {
     //// ---- Initialize Global Descriptor Sets ---- ////
     std::vector<DescriptorPoolRatios> ratios {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
@@ -290,7 +298,6 @@ void VulkanCraft::InitPipelines() {
         .Build(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
     //// ---- Initialize GLTF Material Pipelines ---- ////
-
     VkPushConstantRange push_constant_data {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -337,9 +344,14 @@ void VulkanCraft::InitPipelines() {
 
     vkDestroyShaderModule(m_renderer->GetDevice(), vertex_shader_module, nullptr);
     vkDestroyShaderModule(m_renderer->GetDevice(), fragment_shader_module, nullptr);
+
+    m_chunk_renderer = std::make_unique<ChunkRenderer>(*m_renderer);
+    m_chunk_renderer->Init(m_global_layout);
 }
 
-void VulkanCraft::DestroyPipelines() {
+void GameClient::DestroyPipelines() {
+    m_chunk_renderer->Destroy();
+
     vkDestroyPipeline(m_renderer->GetDevice(), m_gltf_common_data.opaque_pipeline, nullptr);
     vkDestroyPipeline(m_renderer->GetDevice(), m_gltf_common_data.transparent_pipeline, nullptr);
     vkDestroyPipelineLayout(m_renderer->GetDevice(), m_gltf_common_data.opaque_pipeline_layout, nullptr);
@@ -353,7 +365,7 @@ void VulkanCraft::DestroyPipelines() {
     vkDestroyDescriptorSetLayout(m_renderer->GetDevice(), m_gltf_common_data.material_layout, nullptr);
 }
 
-void VulkanCraft::UpdateUniforms() {
+void GameClient::UpdateUniforms() {
     uint32_t i = m_renderer->GetCurrentFrameIndex();
 
     // Map GPU memory onto CPU and edit it
@@ -366,4 +378,138 @@ void VulkanCraft::UpdateUniforms() {
     device_scene_data->projection = m_scene_data.projection;
     device_scene_data->view = m_scene_data.view;
     device_scene_data->view_projection = m_scene_data.projection * m_scene_data.view;
+}
+
+void GameClient::InitClientSocket() {
+    const std::string server_address = "127.0.0.1";
+
+    WSADATA winsock_data;
+    if (WSAStartup(MAKEWORD(2, 2), &winsock_data) != 0) {
+        std::cerr << "WSA starup failed!";
+    }
+
+    addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_DGRAM,
+    };
+
+    addrinfo *address_info;
+    if (getaddrinfo(server_address.data(), "9999", &hints, &address_info) != 0) {
+        std::cerr << "failed to create addrinfo\n";
+    }
+
+    m_socket = socket(address_info->ai_family, address_info->ai_socktype, address_info->ai_protocol);
+    if (m_socket == INVALID_SOCKET) {
+        std::cerr << "Invalid socket!\n";
+    }
+
+    std::cout << "Set Client Sockets!\n";
+
+    NetworkBuffer buffer;
+    Packet send_packet {
+        .packet_type = PacketType::Ack,
+        // .packet_data = std::monostate{},
+    };
+    send_packet.Write(buffer);
+    
+    int bytes_sent = sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, address_info->ai_addr, address_info->ai_addrlen);
+    if (bytes_sent == SOCKET_ERROR) {
+        std::cerr << "Failed to send from client!\n";
+    }
+    buffer.Clear();
+    
+    // Receive an acknowledgement
+    sockaddr from_addr;
+    int from_length = sizeof(from_addr);
+
+    NetworkBuffer recv_buffer;
+    recv_buffer.Resize(512);
+    int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), recv_buffer.GetSize(), 0, &from_addr, &from_length);
+    if (bytes_received == SOCKET_ERROR)
+        std::cerr << "Error on recvfrom!\n";
+
+    Packet recv_packet;
+    recv_packet.Read(recv_buffer);
+    if (recv_packet.packet_type == PacketType::Ack) {
+        std::cout << "RECEIVED ACKNOWLEDGEMENT!\n";
+        m_connected_server = true;
+    }
+
+    u_long non_blocking = 1;
+    if (ioctlsocket(m_socket, FIONBIO, &non_blocking) == SOCKET_ERROR) {
+        std::cerr << "Failed to set client socket non-blocking: " << WSAGetLastError() << "\n";
+    }
+
+    m_server_addrinfo = *address_info;
+}
+
+void GameClient::DestroyClientSocket() {
+    
+}
+
+void GameClient::ReceiveNetworkPackets() {
+    NetworkBuffer recv_buffer{};
+    while (true) {
+        recv_buffer.Resize(512);
+
+        sockaddr from_addr{};
+        int from_length = sizeof(from_addr);
+        
+        int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), recv_buffer.GetSize(), 0, &from_addr, &from_length);
+        if (bytes_received == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            if (error == WSAEWOULDBLOCK)
+                break;
+            std::cerr << "Client recvfrom failed!\n";
+        }
+
+        Packet packet{};
+        packet.Read(recv_buffer);
+
+        switch (packet.packet_type) {
+            case PacketType::SetPosition: {
+                const auto &packet_data = std::get<PacketSetPosition>(packet.packet_data);
+                m_current_position = packet_data.position;
+                break;
+            }
+            case PacketType::Ack:
+            default:
+                break;
+        }
+
+        recv_buffer.Clear();        
+    }
+}
+
+void GameClient::SendNetworkPackets() {
+    //// PLAYER INPUTS ////
+    
+    glm::vec3 player_direction = glm::vec3(0.0f);
+    if (m_input_handler->IsKeyDown(GLFW_KEY_W)) {
+        player_direction += glm::vec3(0.0f, 0.0f, -1.0f);
+    } if (m_input_handler->IsKeyDown(GLFW_KEY_S))
+        player_direction += glm::vec3(0.0f, 0.0f, 1.0f);
+    if (m_input_handler->IsKeyDown(GLFW_KEY_D))
+        player_direction += glm::vec3(1.0f, 0.0f, 0.0f);
+    if (m_input_handler->IsKeyDown(GLFW_KEY_A))
+        player_direction += glm::vec3(-1.0f, 0.0f, 0.0f);
+    
+    if (player_direction != glm::vec3(0.0f)) {
+        player_direction = glm::normalize(player_direction);
+
+        Packet packet {
+            .packet_type = PacketType::MovePlayer,
+            .packet_data = PacketMovePlayer {
+                .direction = player_direction,
+            },
+        };
+        
+        NetworkBuffer send_buffer;
+        packet.Write(send_buffer);
+
+        int bytes = sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
+        if (bytes == SOCKET_ERROR) {
+            std::cerr << "Failed sendto: " << WSAGetLastError() << "\n";
+        }
+    }
 }

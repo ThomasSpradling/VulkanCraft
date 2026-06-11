@@ -1,15 +1,16 @@
 #pragma once
 
-#include "Events/event_handler.h"
+#include "../Application/InputHandler.h"
 class Application;
-#include "Graphics/vulkan_renderer.h"
-class Game {
-public:
-    Game() {}
+#include "../Graphics/VulkanRenderer.h"
 
-    void SetUp(Application *application, std::shared_ptr<EventHandler> event_handler, std::shared_ptr<VulkanRenderer> renderer) {
+class IGame {
+public:
+    IGame() {}
+
+    void SetUp(Application *application, std::shared_ptr<InputHandler> input_handler, std::shared_ptr<VulkanRenderer> renderer) {
         m_application = application;
-        m_event_handler = event_handler;
+        m_input_handler = input_handler;
         m_renderer = renderer;
         // m_application->GetWindowSize();
     }
@@ -24,6 +25,6 @@ public:
     virtual void Render(std::optional<Frame> frame, float delta_time) = 0;
 protected:
     Application *m_application;
-    std::shared_ptr<EventHandler> m_event_handler;
+    std::shared_ptr<InputHandler> m_input_handler;
     std::shared_ptr<VulkanRenderer> m_renderer;
 };

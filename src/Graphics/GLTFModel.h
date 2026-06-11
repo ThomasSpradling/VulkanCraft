@@ -1,9 +1,9 @@
 #pragma once
 
-#include "descriptor_allocator.h"
+#include "DescriptorAllocator.h"
 #include "gpu_structs.h"
-#include "renderable.h"
-#include "vulkan_renderer.h"
+#include "Renderable.h"
+#include "VulkanRenderer.h"
 #include <cstdint>
 #include <filesystem>
 #include <memory>

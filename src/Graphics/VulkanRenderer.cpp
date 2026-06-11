@@ -14,7 +14,7 @@
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
-#include "vulkan_renderer.h"
+#include "VulkanRenderer.h"
 
 VulkanRenderer::VulkanRenderer(GLFWwindow &window) 
     : m_window(window)
@@ -234,7 +234,7 @@ void VulkanRenderer::WriteDescriptorImage(uint32_t binding, VkDescriptorSet desc
     vkUpdateDescriptorSets(m_device, 1, &write_descriptor_set, 0, nullptr);
 }
 
-VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) {
+VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) const {
     std::ifstream file(file_path, std::ios::ate | std::ios::binary);
     if (!file.is_open())
         std::cerr << "Failed to load shader at path '" << file_path << "'.\n";
@@ -262,65 +262,6 @@ VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) {
     VkShaderModule shader_module;
     vkCreateShaderModule(m_device, &create_info, nullptr, &shader_module);
     return shader_module;
-}
-
-
-GPUMesh VulkanRenderer::UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const {
-    // TODO: The below simply uses two staging buffers, one for each buffer. Rewrite to use just one staging buffer.
-    
-    VkBuffer vertex_buffer;
-    VmaAllocation vertex_buffer_alloc;
-
-    VkBuffer index_buffer;
-    VmaAllocation index_buffer_alloc;
-
-    {
-        VkBufferCreateInfo buffer_create_info {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .size = vertices.size() * sizeof(MeshVertex),
-            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            // .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // transfer_dst required for loading buffer data
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        };
-        VmaAllocationCreateInfo allocation_create_info {
-            .flags = 0,
-            .usage = VMA_MEMORY_USAGE_AUTO,
-        };
-        VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &vertex_buffer, &vertex_buffer_alloc, nullptr));
-        LoadBufferData(vertex_buffer, vertices);
-    }
-    
-    // Create index buffer
-    {
-        VkBufferCreateInfo buffer_create_info {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .size = indices.size() * sizeof(uint32_t),
-            .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        };
-        VmaAllocationCreateInfo allocation_create_info {
-            .flags = 0,
-            .usage = VMA_MEMORY_USAGE_AUTO,
-        };
-        VK_CHECK(vmaCreateBuffer(GetMemoryAllocator(), &buffer_create_info, &allocation_create_info, &index_buffer, &index_buffer_alloc, nullptr));
-        LoadBufferData(index_buffer, indices);
-    }
-
-    VkBufferDeviceAddressInfo buffer_device_address_info {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = vertex_buffer,
-    };
-    VkDeviceAddress address = vkGetBufferDeviceAddress(m_device, &buffer_device_address_info);
-
-    return GPUMesh {
-        .vertex_buffer = vertex_buffer,
-        .vertex_buffer_alloc = vertex_buffer_alloc,
-        .index_buffer = index_buffer,
-        .index_buffer_alloc = index_buffer_alloc,
-        .device_address = address
-    };
 }
 
 void VulkanRenderer::DestroyGPUMesh(const GPUMesh &mesh) const {

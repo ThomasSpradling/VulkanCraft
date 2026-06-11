@@ -1,6 +1,7 @@
 #pragma once
 
-#include "event.h"
+#include "Event.h"
+#include <memory>
 
 class EventListener {
 public:

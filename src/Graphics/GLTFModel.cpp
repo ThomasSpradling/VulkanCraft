@@ -1,8 +1,8 @@
-#include "gltf_model.h"
+#include "GLTFModel.h"
 #include "../errors.h"
-#include "descriptor_allocator.h"
-#include "descriptor_writer.h"
-#include "renderable.h"
+#include "DescriptorAllocator.h"
+#include "DescriptorWriter.h"
+#include "Renderable.h"
 
 #define GLM_ENABLE_EXPERIMENTAL 
 #include <glm/gtx/quaternion.hpp>

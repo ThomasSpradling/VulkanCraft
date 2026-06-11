@@ -3,7 +3,7 @@
 #include <volk.h>
 #include <vector>
 
-#include "vulkan_renderer.h"
+#include "VulkanRenderer.h"
 
 class PipelineBuilder_Graphics {
 public:

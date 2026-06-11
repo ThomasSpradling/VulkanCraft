@@ -4,3 +4,4 @@ build
 .vscode
 resources/models
 resources/shaders/**/*.spv
+resources/texts

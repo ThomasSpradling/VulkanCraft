@@ -1,12 +1,17 @@
 #pragma once
 // #include "../game.h"
-#include "../application.h"
-#include "../Events/event_listener.h"
+#include "../Application/Application.h"
+#include "../Events/EventListener.h"
 #include "../Graphics/gpu_structs.h"
 #include <glm/glm.hpp>
 #include <vector>
-#include "../Graphics/gltf_model.h"
-#include "../Graphics/renderable.h"
+#include "../Graphics/GLTFModel.h"
+#include "../Graphics/Renderable.h"
+#include "ChunkRenderer.h"
+
+// Sockets
+#include <WinSock2.h>
+#include <WS2tcpip.h>
 
 struct SceneData {
     glm::mat4 view;
@@ -17,13 +22,12 @@ struct SceneData {
     glm::vec4 sunlight_color;
 };
 
-class VulkanCraft : public Game, public EventListener {
+class GameClient : public IGame {
 public:
     virtual void Initialize() override;
     virtual void ShutDown() override;
     virtual void Update(float delta_time) override;
     virtual void Render(std::optional<Frame> frame, float delta_time) override;
-    virtual void OnEvent(const Event &event) override;
 private:
     struct PerFrameData {
         VkDescriptorSet global_descriptor_set = VK_NULL_HANDLE;
@@ -40,6 +44,9 @@ private:
         VkDeviceAddress vertex_buffer;
     };
 private:
+    float m_yaw = 90.0f;
+    float m_pitch = 0.0f;
+    glm::vec3 m_current_position { 0.0f, 0.0f, 5.0f };
     // Temporary for input testing
     glm::vec3 m_current_color = { 164.0f/256.0f, 30.0f/256.0f, 34.0f/256.0f };
 
@@ -56,7 +63,15 @@ private:
     SceneData m_scene_data;
 
     DrawContext m_draw_context;
-    // std::vector<RenderObject> m_render_objects;
+
+    std::unique_ptr<ChunkRenderer> m_chunk_renderer;
+
+    double m_network_send_timer = 0.0;
+    const int NETWORK_INPUT_SEND_RATE = 10; // Hz
+
+    SOCKET m_socket;
+    addrinfo m_server_addrinfo;
+    bool m_connected_server = false;
 private:
     void InitRenderTargets();
     void DestroyRenderTargets();
@@ -70,5 +85,11 @@ private:
     void InitPipelines();
     void DestroyPipelines();
 
+    void InitClientSocket();
+    void DestroyClientSocket();
+
     void UpdateUniforms();
+
+    void ReceiveNetworkPackets();
+    void SendNetworkPackets();
 };

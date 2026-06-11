@@ -105,4 +105,5 @@ target_link_libraries(${PROJECT_NAME}
     VulkanMemoryAllocator
     tinygltf
     imgui
+    ws2_32
 )

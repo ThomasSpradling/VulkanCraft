@@ -1,18 +1,17 @@
-#include "Events/WindowEvents/mouse_events.h"
-#include "Graphics/utils.h"
+#include "../Events/WindowEvents/MouseEvents.h"
+#include "../Graphics/utils.h"
 
-#include "application.h"
-#include "vulkan/vulkan_core.h"
-#include "Graphics/vulkan_renderer.h"
+#include "Application.h"
+#include "../Graphics/VulkanRenderer.h"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <thread>
-#include "errors.h"
+#include "../errors.h"
 
-Application::Application(std::shared_ptr<Game> game)
+Application::Application(std::shared_ptr<IGame> game)
     : m_game(game)
 {
     if (!glfwInit()) {
@@ -48,13 +47,16 @@ Application::Application(std::shared_ptr<Game> game)
     m_vulkan_renderer->Initialize();
 
     m_event_handler = std::make_shared<EventHandler>();
+    m_input_handler = std::make_shared<InputHandler>(*m_event_handler);
+    m_input_handler->Initialize();
 
-    m_game->SetUp(this, m_event_handler, m_vulkan_renderer);
+    m_game->SetUp(this, m_input_handler, m_vulkan_renderer);
 }
 
 Application::~Application() {
     vkDeviceWaitIdle(m_vulkan_renderer->GetDevice());
 
+    m_input_handler->ShutDown();
     m_game->ShutDown();
     m_vulkan_renderer->ShutDown();
 

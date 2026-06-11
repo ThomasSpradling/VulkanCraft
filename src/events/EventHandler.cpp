@@ -1,4 +1,4 @@
-#include "event_handler.h"
+#include "EventHandler.h"
 
 void EventHandler::AddListener(EventListener *listener) {
     m_listeners.push_back(listener);

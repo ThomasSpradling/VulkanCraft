@@ -1,13 +1,13 @@
 #pragma once
 
-#include "../event.h"
+#include "../Event.h"
 #include <glm/glm.hpp>
 
 class MouseButtonPressedEvent : public Event {
 public:
     MouseButtonPressedEvent(int button) : m_button(button) {}
 
-    int GetKeyCode() const { return m_button; }
+    int GetMouseButton() const { return m_button; }
 
     DEFINE_EVENT_TYPE(MouseButtonPressedEvent)
 private:
@@ -18,7 +18,7 @@ class MouseButtonReleasedEvent : public Event {
 public:
     MouseButtonReleasedEvent(int button) : m_button(button) {}
 
-    int GetKeyCode() const { return m_button; }
+    int GetMouseButton() const { return m_button; }
 
     DEFINE_EVENT_TYPE(MouseButtonReleasedEvent)
 private:

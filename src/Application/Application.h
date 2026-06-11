@@ -6,10 +6,10 @@
 #include <glm/glm.hpp>
 #include <GLFW/glfw3.h>
 
-#include "Events/event_handler.h"
-#include "Events/WindowEvents/key_events.h"
-#include "game.h"
-#include "Graphics/vulkan_renderer.h"
+#include "../Events/EventHandler.h"
+#include "../Events/WindowEvents/KeyEvents.h"
+#include "IGame.h"
+#include "../Graphics/VulkanRenderer.h"
 
 
 /**
@@ -20,7 +20,7 @@
  */
 class Application {
 public:
-    Application(std::shared_ptr<Game> game);
+    Application(std::shared_ptr<IGame> game);
     ~Application();
 
     void Run();
@@ -32,7 +32,8 @@ private:
     };
 private:
     std::shared_ptr<EventHandler> m_event_handler = nullptr;
-    std::shared_ptr<Game> m_game = nullptr;
+    std::shared_ptr<InputHandler> m_input_handler = nullptr;
+    std::shared_ptr<IGame> m_game = nullptr;
 
     GLFWwindow *m_window;
 

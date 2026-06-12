@@ -2,6 +2,8 @@
 #include <bit>
 #include <cstdint>
 
+#include "../errors.h"
+
 void NetworkBuffer::Resize(size_t size) {
     m_offset = 0;
     m_data.resize(size);
@@ -14,7 +16,8 @@ void NetworkBuffer::Clear() {
 }
 
 uint8_t NetworkBuffer::ReadByte() {
-    return static_cast<uint32_t>(m_data[m_offset++]);
+    Assert(m_offset + 1 <= m_data.size(), "Failed to read byte from this buffer!");
+    return static_cast<uint8_t>(m_data[m_offset++]);
 }
 
 bool NetworkBuffer::ReadBoolean() {
@@ -22,14 +25,20 @@ bool NetworkBuffer::ReadBoolean() {
 }
 
 uint16_t NetworkBuffer::ReadShort() {
+    Assert(m_offset + 2 <= m_data.size(), "Failed to read short from this buffer!");
+
     uint16_t byte0 = m_data[m_offset];
     uint16_t byte1 = m_data[m_offset + 1];
+
+    __uint128_t d;
 
     m_offset += 2;
     return (byte0 << 8) | byte1;
 }
 
 uint32_t NetworkBuffer::ReadInteger() {
+    Assert(m_offset + 4 <= m_data.size(), "Failed to read integer from this buffer!");
+
     uint32_t byte0 = m_data[m_offset];
     uint32_t byte1 = m_data[m_offset + 1];
     uint32_t byte2 = m_data[m_offset + 2];
@@ -40,10 +49,14 @@ uint32_t NetworkBuffer::ReadInteger() {
 }
 
 float NetworkBuffer::ReadFloat() {
+    Assert(m_offset + 4 <= m_data.size(), "Failed to read float from this buffer!");
+
     return std::bit_cast<float>(ReadInteger());
 }
 
 glm::vec3 NetworkBuffer::ReadVec3() {
+    Assert(m_offset + 12 <= m_data.size(), "Failed to read Vec3 from this buffer!");
+
     float x = ReadFloat();
     float y = ReadFloat();
     float z = ReadFloat();
@@ -78,4 +91,8 @@ void NetworkBuffer::WriteVec3(glm::vec3 value) {
     WriteFloat(value.x);
     WriteFloat(value.y);
     WriteFloat(value.z);
+}
+
+void NetworkBuffer::Insert(const NetworkBuffer &buffer) {
+    m_data.insert(m_data.end(), buffer.m_data.begin(), buffer.m_data.end());
 }

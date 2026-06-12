@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstring>
+#include <string>
 #define NOMINMAX
 #include <WinSock2.h>
+#include <WS2tcpip.h>
 #include <cstdint>
 
 struct NetworkAddress {
@@ -40,4 +42,14 @@ inline NetworkAddress FromSockAddr(const sockaddr &socket_address) {
         .address = ntohl(addr.sin_addr.s_addr),
         .port = ntohs(addr.sin_port),
     };
+}
+
+inline std::string GetHostName(int ai_family, const sockaddr &address) {
+    const sockaddr_in *address_in = reinterpret_cast<const sockaddr_in *>(&address);
+    const void *addr = &(address_in->sin_addr);
+
+    std::string ip_address;
+    ip_address.resize(INET6_ADDRSTRLEN);
+    inet_ntop(ai_family, addr, ip_address.data(), ip_address.size());
+    return ip_address;
 }

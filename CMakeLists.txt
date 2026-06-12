@@ -36,6 +36,11 @@ add_library(stb
 )
 target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
 
+## Checksum generation
+add_library(crc32 third_party/crc32/crc32.cpp)
+target_include_directories(crc32 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/crc32)
+
+
 ## tinygltf
 
 set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
@@ -105,5 +110,6 @@ target_link_libraries(${PROJECT_NAME}
     VulkanMemoryAllocator
     tinygltf
     imgui
-    ws2_32
+    crc32 
+    ws2_32 # Windows Sockets
 )

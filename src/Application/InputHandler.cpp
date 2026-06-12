@@ -21,7 +21,6 @@ void InputHandler::OnEvent(const Event &event) {
     dispatcher.Dispatch<KeyPressedEvent>([this](const KeyPressedEvent &e) {
         m_keyboard.keys[e.GetKeyCode()].pressed = true;
         m_keyboard.keys[e.GetKeyCode()].down = true;
-        std::cout << "KEY PRESS\n";
     });
 
     dispatcher.Dispatch<KeyReleasedEvent>([this](const KeyReleasedEvent &e) {

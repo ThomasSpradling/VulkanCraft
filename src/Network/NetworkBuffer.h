@@ -3,7 +3,9 @@
 #include <vector>
 #include <glm/glm.hpp>
 
-// TODO: Account for correct endianess
+static_assert(sizeof(float) == sizeof(uint32_t), "NetworkBuffer assumes 32-bit floats.");
+static_assert(std::numeric_limits<float>::is_iec559);
+
 class NetworkBuffer {
 public:
     NetworkBuffer() {};
@@ -11,6 +13,7 @@ public:
 
     size_t GetSize() { return m_data.size(); }
     char *GetData() { return reinterpret_cast<char *>(m_data.data()); }
+    uint8_t *GetRawData() { return m_data.data(); }
     const char *GetData() const { return reinterpret_cast<const char *>(m_data.data()); }
 
     void Resize(size_t size);
@@ -37,6 +40,8 @@ public:
     void Write(float value) { WriteFloat(value); }
     void Write(glm::vec3 value) { WriteVec3(value); }
     void Write(bool value) { WriteBoolean(value); }
+
+    void Insert(const NetworkBuffer &buffer);
 private:
     std::vector<uint8_t> m_data;
     int m_offset = 0;

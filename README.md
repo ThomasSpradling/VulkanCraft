@@ -11,3 +11,4 @@
  - [**Getting Started with Winsock**](https://learn.microsoft.com/en-us/windows/win32/winsock/getting-started-with-winsock)
  - [**Building a Game Network Protocol**](https://gafferongames.com/categories/building-a-game-network-protocol/): Gives good advice for building networks over UDP, including information on bitpacking, packet fragmentation, and reliability. Hightly recommended!
  - [**Making a Multiplayer FPS**](https://codersblock.org/multiplayer-fps/): Some useful implementation details on handling multiple clients and client-side prediction.
+ - [**Fast-Paced Multiplayer**](https://www.gabrielgambetta.com/client-server-game-architecture.html)

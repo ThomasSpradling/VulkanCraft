@@ -44,6 +44,8 @@ private:
 
     static const int MAX_CLIENTS = 32;
     std::array<Client, MAX_CLIENTS> m_clients {};
+
+    addrinfo *m_address_info = nullptr;
 private:
     void Tick(float delta_time);
     void ReceiveNetworkPackets();

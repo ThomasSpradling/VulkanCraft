@@ -22,10 +22,9 @@ struct PacketJoinResult {
 
 /**
  * Packet Structure:
- * 0    PACKET_ID
- * 1    COUNT
- * 5    ID_0        POSITION_0
- * 21   ID_1        POSITION_1
+ * 0    PLAYER_COUNT (4 bytes)
+ * 4    ID_0  (4 bytes)     POSITION_0 (12 bytes)
+ * 20   ID_1  (4 bytes)     POSITION_1 (12 bytes)
  * ...
  */
 struct PacketPlayerState {

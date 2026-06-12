@@ -2,8 +2,10 @@
 #include <array>
 #include <chrono>
 
+#include <cstdio>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <thread>
 #include "../Network/Packets.h"
 
@@ -20,9 +22,10 @@ void GameServer::Initialize() {
     };
 
     addrinfo *address_info;
-    if (getaddrinfo(nullptr, "9999", &hints, &address_info) != 0) {
+    if (getaddrinfo(nullptr, std::to_string(PROTOCOL_PORT).data(), &hints, &address_info) != 0) {
         std::cerr << "failed to create addrinfo\n";
     }
+    m_address_info = address_info;
 
     m_socket = socket(address_info->ai_family, address_info->ai_socktype, address_info->ai_protocol);
     if (m_socket == INVALID_SOCKET) {
@@ -33,12 +36,17 @@ void GameServer::Initialize() {
         std::cerr << "Failed to bind!\n";
     }
 
-    std::cout << "Server running at address on port!\n";
+    std::cout << "Server listening at address "
+        << GetHostName(address_info->ai_family, *(address_info->ai_addr))
+        << " on port "
+        << PROTOCOL_PORT
+        << ".\n";
 
     u_long enabled = 1;
     if (ioctlsocket(m_socket, FIONBIO, &enabled) == SOCKET_ERROR) {
         std::cerr << "Failed to set server socket non-blocking: " << WSAGetLastError() << "\n";
     }
+
 }
 
 void GameServer::Run() {
@@ -137,7 +145,16 @@ void GameServer::ReceiveNetworkPackets() {
 
         //// Process Packet Commands ////
         Packet packet;
-        packet.Read(recv_buffer);
+        PacketError err = packet.Read(recv_buffer);
+        if (err == PacketError::ChecksumError) {
+            std::cerr << "Packet dropped due to mismatching checksum.\n";
+            continue;
+        }
+
+        if (err == PacketError::ChecksumError) {
+            std::cerr << "Packet dropped due to serialization error.\n";
+            continue;
+        }
 
         switch (packet.packet_type) {
             case PacketType::ClientJoin: {
@@ -164,7 +181,12 @@ void GameServer::ReceiveNetworkPackets() {
 
                     sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length);
                 } else {
-                    std::cout << "NEW CLIENT: " << slot << "\n";
+                    std::cout << "Client " << slot << " connected"
+                        << " from "
+                        << GetHostName(m_address_info->ai_family, sock_client_addr)
+                        << " on port "
+                        << client_addr.port
+                        << ".\n";
                     send_packet.packet_data = PacketJoinResult{
                         .is_accepted = true,
                         .player_id = static_cast<uint32_t>(slot),

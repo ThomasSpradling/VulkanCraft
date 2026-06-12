@@ -2,6 +2,7 @@
 #include <array>
 #include <glm/gtc/quaternion.hpp>
 #include <optional>
+#include <string>
 #include <variant>
 
 // #include "../backend/resource_manager/text_resource.h"
@@ -19,6 +20,7 @@
 #include "../Graphics/PipelineBuilder.h"
 #include <vulkan/vulkan_core.h>
 #include "GameClient.h"
+#include "../Network/Address.h"
 #include <iostream>
 #include <vector>
 
@@ -438,7 +440,7 @@ void GameClient::InitClientSocket() {
     };
 
     addrinfo *address_info;
-    if (getaddrinfo(server_address.data(), "9999", &hints, &address_info) != 0) {
+    if (getaddrinfo(server_address.data(), std::to_string(PROTOCOL_PORT).data(), &hints, &address_info) != 0) {
         std::cerr << "failed to create addrinfo\n";
     }
 
@@ -446,8 +448,6 @@ void GameClient::InitClientSocket() {
     if (m_socket == INVALID_SOCKET) {
         std::cerr << "Invalid socket!\n";
     }
-
-    std::cout << "Set Client Sockets!\n";
 
     //// Client ////
     NetworkBuffer buffer;
@@ -478,13 +478,20 @@ void GameClient::InitClientSocket() {
         m_connected_server = true;
         auto data = std::get<PacketJoinResult>(recv_packet.packet_data);
         if (data.is_accepted) {
-            std::cerr << "Successfully connected to server!\n";
+            std::cout << "Successfully connected to server at "
+                << GetHostName(address_info->ai_family, from_addr)
+                << " on port "
+                << PROTOCOL_PORT
+                << ".\n";
+
             m_connected_server = true;
             m_player_id = data.player_id;
         } else {
             std::cerr << "Could not connect to server!\n";
         }
     }
+
+    
 
     u_long non_blocking = 1;
     if (ioctlsocket(m_socket, FIONBIO, &non_blocking) == SOCKET_ERROR) {
@@ -515,7 +522,16 @@ void GameClient::ReceiveNetworkPackets() {
         }
 
         Packet packet{};
-        packet.Read(recv_buffer);
+        PacketError err = packet.Read(recv_buffer);
+        if (err == PacketError::ChecksumError) {
+            std::cerr << "Packet dropped due to mismatching checksum.\n";
+            continue;
+        }
+
+        if (err == PacketError::ChecksumError) {
+            std::cerr << "Packet dropped due to serialization error.\n";
+            continue;
+        }
 
         switch (packet.packet_type) {
             case PacketType::PlayerState: {
@@ -528,7 +544,6 @@ void GameClient::ReceiveNetworkPackets() {
                         m_current_position = m_player_positions[i];
                     }
                 }
-                // std::cout << "RECEIVED STATE UPDATE: Current Postion = " << m_current_position.x << "," << m_current_position.y << "," << m_current_position.z << "\n";
                 break;
             }
             case PacketType::JoinResult:

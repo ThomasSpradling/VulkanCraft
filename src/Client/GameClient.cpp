@@ -99,9 +99,9 @@ void GameClient::Update(float delta_time) {
     projection[1][1] *= -1.0f;
 
     glm::vec3 forward;
-    forward.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
-    forward.y = sin(glm::radians(m_pitch));
-    forward.z = -sin(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+    forward.x = cos(glm::radians(m_current_yaw)) * cos(glm::radians(m_current_pitch));
+    forward.y = sin(glm::radians(m_current_pitch));
+    forward.z = -sin(glm::radians(m_current_yaw)) * cos(glm::radians(m_current_pitch));
     forward = glm::normalize(forward);
 
     glm::vec3 player_forward(forward.x, 0.0f, forward.z);
@@ -115,7 +115,7 @@ void GameClient::Update(float delta_time) {
     m_player_direction = player_forward;
 
     glm::vec3 camera_position = m_current_position - player_forward * 5.0f + glm::vec3(0.0f, 1.0f, 0.0f) * 3.0f;
-    glm::vec3 camera_target = m_current_position + player_forward * 8.0f;
+    glm::vec3 camera_target = m_current_position + glm::vec3(0.0f, 1.5f, 0.0f) + forward * 8.0f;
 
     glm::mat4 view = glm::lookAt(
         camera_position,
@@ -139,19 +139,18 @@ void GameClient::Render(std::optional<Frame> frame, float delta_time) {
     }
 
     UpdateUniforms();
-
-    glm::vec3 forward = m_player_direction;
-    forward.y = 0.0f;
-    glm::mat4 rotate = glm::mat4_cast(glm::quatLookAtLH(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-
     
     m_draw_context.opaque_objects.clear();
     m_draw_context.transparent_objects.clear();
     
-    for (uint32_t i = 0; i < m_player_positions.size(); ++i) {
-        glm::vec3 pos = m_player_positions[i];
+    for (uint32_t i = 0; i < m_players.size(); ++i) {
+        glm::vec3 pos = m_players[i].position;
+        float yaw = m_players[i].yaw;
+        float pitch = m_players[i].pitch;
         glm::mat4 translate = glm::translate(pos);
-        m_model->Draw(m_draw_context, translate * rotate);
+
+        glm::mat4 yaw_rotate = glm::rotate(glm::mat4(1.0f), glm::radians(yaw + 90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        m_model->Draw(m_draw_context, translate * yaw_rotate);
     }
 
     TransitionImageLayout(frame->cmd, frame->image, IMAGE_SUBRESOURCE_RANGE_COLOR, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -536,12 +535,19 @@ void GameClient::ReceiveNetworkPackets() {
         switch (packet.packet_type) {
             case PacketType::PlayerState: {
                 const auto &packet_data = std::get<PacketPlayerState>(packet.packet_data);
-                m_player_positions = packet_data.positions;
-                m_player_ids = packet_data.ids;
+                m_players.resize(packet_data.count);
+                for (uint32_t i = 0; i < packet_data.count; ++i) {
+                    m_players[i] = {
+                        .id = packet_data.data[i].id,
+                        .position = packet_data.data[i].position,
+                        .yaw = packet_data.data[i].yaw,
+                        .pitch = packet_data.data[i].pitch,
+                    };
 
-                for (uint32_t i = 0; i < m_player_positions.size(); ++i) {
-                    if (m_player_ids[i] == m_player_id) {
-                        m_current_position = m_player_positions[i];
+                    if (m_players[i].id == m_player_id) {
+                        m_current_position = m_players[i].position;
+                        m_current_yaw = m_players[i].yaw;
+                        m_current_pitch = m_players[i].pitch;
                     }
                 }
                 break;
@@ -557,16 +563,65 @@ void GameClient::ReceiveNetworkPackets() {
 
 void GameClient::SendNetworkPackets() {
     //// PLAYER INPUTS ////
+
+    float mouse_dx = m_input_handler->GetMouseDeltaX();
+    float mouse_dy = m_input_handler->GetMouseDeltaY();
+
+    glm::vec2 look_delta = glm::vec2(0.0f);
+
+    if (mouse_dx != 0.0f) {
+        look_delta.x += mouse_dx;
+    }
+
+    if (mouse_dy != 0.0f) {
+        look_delta.y += mouse_dy;
+    }
+
+    float yaw = m_current_yaw;
+    float pitch = m_current_pitch;
+    if (look_delta != glm::vec2(0.0f)) {
+        yaw -= look_delta.x;
+        pitch -= look_delta.y;
+        pitch = glm::clamp(pitch, -89.0f, 89.0f);
+
+        Packet packet {
+            .packet_type = PacketType::ChangeView,
+            .packet_data = PacketChangeView {
+                .player_id = m_player_id,
+                .yaw = yaw,
+                .pitch = pitch,
+            }
+        };
+
+        NetworkBuffer send_buffer;
+        packet.Write(send_buffer);
+
+        int bytes = sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
+        if (bytes == SOCKET_ERROR) {
+            std::cerr << "Failed sendto: " << WSAGetLastError() << "\n";
+        }
+    }
     
+    glm::vec3 forward = glm::vec3(
+        cos(glm::radians(yaw)),
+        0.0f,
+        -sin(glm::radians(yaw))
+    );
+
+    forward = glm::normalize(forward);
+
+    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+
     glm::vec3 player_direction = glm::vec3(0.0f);
-    if (m_input_handler->IsKeyDown(GLFW_KEY_W)) {
-        player_direction += glm::vec3(0.0f, 0.0f, -1.0f);
-    } if (m_input_handler->IsKeyDown(GLFW_KEY_S))
-        player_direction += glm::vec3(0.0f, 0.0f, 1.0f);
+
+    if (m_input_handler->IsKeyDown(GLFW_KEY_W))
+        player_direction += forward;
+    if (m_input_handler->IsKeyDown(GLFW_KEY_S))
+        player_direction -= forward;
     if (m_input_handler->IsKeyDown(GLFW_KEY_D))
-        player_direction += glm::vec3(1.0f, 0.0f, 0.0f);
+        player_direction += right;
     if (m_input_handler->IsKeyDown(GLFW_KEY_A))
-        player_direction += glm::vec3(-1.0f, 0.0f, 0.0f);
+        player_direction -= right;
     
     if (player_direction != glm::vec3(0.0f)) {
         player_direction = glm::normalize(player_direction);

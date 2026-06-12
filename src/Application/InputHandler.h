@@ -53,7 +53,7 @@ public:
 
     inline float GetMouseWheelOffsetY() const { return m_mouse.wheel.offset_y; };
 private:
-    float m_mouse_sensitivity = 0.1f;
+    float m_mouse_sensitivity = 0.2f;
 
     Keyboard m_keyboard;
     Mouse m_mouse;

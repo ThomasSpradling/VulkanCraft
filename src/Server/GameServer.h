@@ -16,11 +16,15 @@ public:
     void Update(float delta_time);
 private:
     struct PlayerState {
+        float yaw = 90.0f;
+        float pitch = 0.0f;
         glm::vec3 position { 0.0f, 0.0f, 5.0f };
     };
     
     struct PlayerInput {
         glm::vec3 movement_direction { 0.0f };
+        float yaw = 90.0f;
+        float pitch = 0.0f;
     };
 
     struct Client {

@@ -109,8 +109,9 @@ void GameServer::Tick(float delta_time) {
             continue;
         }
 
-        client.player_state.position +=
-            client.player_input.movement_direction * 0.01f * delta_time;
+        client.player_state.position += client.player_input.movement_direction * 0.01f * delta_time;
+        client.player_state.yaw = client.player_input.yaw;
+        client.player_state.pitch = client.player_input.pitch;
 
         client.player_input.movement_direction = glm::vec3(0.0f);
         client.last_timestamp += delta_time;
@@ -241,6 +242,17 @@ void GameServer::ReceiveNetworkPackets() {
                 }
                 break;
             }
+            case PacketType::ChangeView: {
+                const auto &data = std::get<PacketChangeView>(packet.packet_data);
+                
+                if (m_clients[data.player_id].client_address == client_addr &&
+                    m_clients[data.player_id].id == data.player_id)
+                {   
+                    m_clients[data.player_id].player_input.yaw = data.yaw;
+                    m_clients[data.player_id].player_input.pitch = data.pitch;
+                }
+                break;
+            }
             case PacketType::Invalid:
             default:
                 break;
@@ -253,22 +265,24 @@ void GameServer::SendNetworkPackets() {
     Packet packet {
         .packet_type = PacketType::PlayerState,
     };
-    std::vector<uint32_t> player_ids {};
-    std::vector<glm::vec3> player_positions {};
 
+    std::vector<PacketPlayerState::Data> players {};
     uint32_t count = 0;
     for (Client &client : m_clients) {
         if (client.id != -1) {
-            player_ids.push_back(client.id);
-            player_positions.push_back(client.player_state.position);
+            players.push_back({
+                .id = static_cast<uint32_t>(client.id),
+                .position = client.player_state.position,
+                .yaw = client.player_state.yaw,
+                .pitch = client.player_state.pitch,
+            });
             
             ++count;
         }
     }
     packet.packet_data = PacketPlayerState{
         .count = count,
-        .ids = player_ids,
-        .positions = player_positions,
+        .data = players
     };
     packet.Write(send_buffer);
 

@@ -3,6 +3,7 @@
 
 #include "Application.h"
 #include "../Graphics/VulkanRenderer.h"
+#include <GLFW/glfw3.h>
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -40,6 +41,8 @@ Application::Application(std::shared_ptr<IGame> game)
     glfwSetMouseButtonCallback(m_window, MouseButtonCallback);
     glfwSetCursorPosCallback(m_window, MouseMoveCallback);
     glfwSetScrollCallback(m_window, ScrollCallback);
+
+    glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     m_vulkan_renderer = std::make_shared<VulkanRenderer>(*m_window);
 
@@ -140,6 +143,16 @@ void Application::Render(float delta_time) {
 }
 
 void Application::Update(float delta_time) {
+    if (m_input_handler->IsKeyPressed(GLFW_KEY_ESCAPE)) {
+        glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        m_mouse.grabbed = false;
+    }
+
+    if (m_input_handler->IsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        m_mouse.grabbed = true;
+    }
+
     m_game->Update(delta_time);
 }
 
@@ -195,6 +208,7 @@ void Application::MouseMoveCallback(GLFWwindow *window, double x, double y) {
     if (!app->m_mouse.grabbed) {
         app->m_mouse.position = { x, y };
         app->m_mouse.grabbed = true;
+        return;
     }
 
     glm::vec2 current_position { x, y };

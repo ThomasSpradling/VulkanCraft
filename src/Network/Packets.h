@@ -19,6 +19,7 @@ enum class PacketType : uint8_t {
     ClientJoin,
     ClientLeave,
     MovePlayer,
+    ChangeView,
     Heartbeat,
 
     // Server packets
@@ -37,6 +38,7 @@ using PacketData = std::variant<
     PacketClientLeave,
     PacketHeartbeat,
     PacketMovePlayer,
+    PacketChangeView,
 
     PacketJoinResult,
     PacketPlayerState
@@ -85,6 +87,7 @@ public:
             REGISTER_PACKET(Heartbeat)
             REGISTER_PACKET(ClientLeave)
             REGISTER_PACKET(MovePlayer)
+            REGISTER_PACKET(ChangeView)
             REGISTER_PACKET(JoinResult)
             REGISTER_PACKET(PlayerState)
 
@@ -138,6 +141,7 @@ private:
             REGISTER_PACKET(Heartbeat)
             REGISTER_PACKET(ClientLeave)
             REGISTER_PACKET(MovePlayer)
+            REGISTER_PACKET(ChangeView)
             REGISTER_PACKET(JoinResult)
             REGISTER_PACKET(PlayerState)
 

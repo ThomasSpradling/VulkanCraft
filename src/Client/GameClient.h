@@ -44,9 +44,15 @@ private:
         glm::mat4 model;
         VkDeviceAddress vertex_buffer;
     };
+
+    struct Player {
+        uint32_t id;
+        glm::vec3 position;
+        float yaw, pitch;
+    };
 private:
-    float m_yaw = 90.0f;
-    float m_pitch = 0.0f;
+    // float m_yaw = 90.0f;
+    // float m_pitch = 0.0f;
     glm::vec3 m_player_direction { 0.0f, 0.0f, 0.0f };
 
     // Temporary for input testing
@@ -73,10 +79,11 @@ private:
     const int NETWORK_INPUT_SEND_RATE = 60; // Hz
     const int HEART_RATE = 1; // Hz
 
-    std::vector<glm::vec3> m_player_positions;
-    std::vector<uint32_t> m_player_ids;
+    std::vector<Player> m_players;
 
     glm::vec3 m_current_position;
+    float m_current_yaw = 90.0f;
+    float m_current_pitch = 0.0f;
 
     SOCKET m_socket;
     addrinfo m_server_addrinfo;

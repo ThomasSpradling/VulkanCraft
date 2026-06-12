@@ -41,3 +41,21 @@ struct PacketMovePlayer {
         buffer.Write(direction);
     }
 };
+
+struct PacketChangeView {
+    uint32_t player_id;
+    float yaw;
+    float pitch;
+
+    inline void Read(NetworkBuffer &buffer) {
+        player_id = buffer.ReadInteger();
+        yaw = buffer.ReadFloat();
+        pitch = buffer.ReadFloat();
+    }
+
+    inline void Write(NetworkBuffer &buffer) const {
+        buffer.Write(player_id);
+        buffer.Write(yaw);
+        buffer.Write(pitch);
+    }
+};

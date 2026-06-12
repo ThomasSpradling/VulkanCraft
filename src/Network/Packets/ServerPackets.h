@@ -23,33 +23,41 @@ struct PacketJoinResult {
 /**
  * Packet Structure:
  * 0    PLAYER_COUNT (4 bytes)
- * 4    ID_0  (4 bytes)     POSITION_0 (12 bytes)
- * 20   ID_1  (4 bytes)     POSITION_1 (12 bytes)
+ * 4    ID_0  (4 bytes)     POSITION_0 (12 bytes)     DIRECTION_0 (8 bytes)
+ * 28   ID_1  (4 bytes)     POSITION_1 (12 bytes)     DIRECTION_1 (8 bytes)
  * ...
  */
 struct PacketPlayerState {
+    struct Data {
+        uint32_t id;
+        glm::vec3 position;
+        float yaw, pitch;
+    };
+    
     uint32_t count;
-    std::vector<uint32_t> ids;
-    std::vector<glm::vec3> positions;
+    std::vector<Data> data;
 
     inline void Read(NetworkBuffer &buffer) {
         count = buffer.ReadInteger();
-        ids.resize(count);
-        positions.resize(count);
+        data.resize(count);
 
         for (uint32_t i = 0; i < count; ++i) {
-            ids[i] = buffer.ReadInteger();
-            positions[i] = buffer.ReadVec3();
+            data[i].id = buffer.ReadInteger();
+            data[i].position = buffer.ReadVec3();
+            data[i].yaw = buffer.ReadFloat();
+            data[i].pitch = buffer.ReadFloat();
         }
     }
 
     inline void Write(NetworkBuffer &buffer) const {
         buffer.Write(count);
-        Assert(positions.size() == count, "Size mismatch in writing server packet PacketState");
+        Assert(data.size() == count, "Size mismatch in writing server packet PacketState");
 
         for (uint32_t i = 0; i < count; ++i) {
-            buffer.Write(ids[i]);
-            buffer.Write(positions[i]);
+            buffer.Write(data[i].id);
+            buffer.Write(data[i].position);
+            buffer.Write(data[i].yaw);
+            buffer.Write(data[i].pitch);
         }
     }
 };

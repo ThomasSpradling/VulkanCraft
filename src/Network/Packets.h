@@ -5,41 +5,32 @@
 #include <glm/glm.hpp>
 #include <variant>
 
+#include "Packets/ClientPackets.h"
+#include "Packets/ServerPackets.h"
+#include "../errors.h"
+
 enum class PacketType : uint8_t {
     Invalid = 0,
-    Ack,
+
+    // Client packets
+    ClientJoin,
+    ClientLeave,
     MovePlayer,
-    SetPosition,
-};
+    Heartbeat,
 
-struct PacketMovePlayer {
-    glm::vec3 direction;
-
-    inline void Read(NetworkBuffer &buffer) {
-        direction = buffer.ReadVec3();
-    }
-
-    inline void Write(NetworkBuffer &buffer) const {
-        buffer.Write(direction);
-    }
-};
-
-struct PacketSetPosition {
-    glm::vec3 position;
-
-    inline void Read(NetworkBuffer &buffer) {
-        position = buffer.ReadVec3();
-    }
-
-    inline void Write(NetworkBuffer &buffer) const {
-        buffer.Write(position);
-    }
+    // Server packets
+    JoinResult,
+    PlayerState,
 };
 
 using PacketData = std::variant<
     std::monostate,
+    PacketClientLeave,
+    PacketHeartbeat,
     PacketMovePlayer,
-    PacketSetPosition
+
+    PacketJoinResult,
+    PacketPlayerState
 >;
 
 struct Packet {
@@ -59,10 +50,13 @@ struct Packet {
                 break;                                            \
             }
             
+            REGISTER_PACKET(Heartbeat)
+            REGISTER_PACKET(ClientLeave)
             REGISTER_PACKET(MovePlayer)
-            REGISTER_PACKET(SetPosition)
+            REGISTER_PACKET(JoinResult)
+            REGISTER_PACKET(PlayerState)
 
-            case PacketType::Ack:
+            case PacketType::ClientJoin:
             case PacketType::Invalid:
             default:
                 packet_data = std::monostate{};
@@ -76,17 +70,21 @@ struct Packet {
         buffer.Write(static_cast<uint8_t>(packet_type));
 
         switch (packet_type) {
-#define REGISTER_PACKET(pack)                                           \
-            case PacketType::pack: {                                    \
-                const auto &data = std::get<Packet##pack>(packet_data); \
-                data.Write(buffer);                                     \
-                break;                                                  \
+#define REGISTER_PACKET(pack)                                                \
+            case PacketType::pack: {                                         \
+                const auto *data = std::get_if<Packet##pack>(&packet_data);  \
+                Assert(data != nullptr, "Packet type mismatch");             \
+                data->Write(buffer);                                         \
+                break;                                                       \
             }
 
+            REGISTER_PACKET(Heartbeat)
+            REGISTER_PACKET(ClientLeave)
             REGISTER_PACKET(MovePlayer)
-            REGISTER_PACKET(SetPosition)
+            REGISTER_PACKET(JoinResult)
+            REGISTER_PACKET(PlayerState)
 
-            case PacketType::Ack:
+            case PacketType::ClientJoin:
             case PacketType::Invalid:
             default:
                 break;

@@ -35,5 +35,5 @@ struct DrawContext {
  */
 class IRenderable {
 public:
-    virtual void Draw(DrawContext &context) = 0;
+    virtual void Draw(DrawContext &context, const glm::mat4 &transform) = 0;
 };

@@ -17,12 +17,15 @@ public:
     void Clear();
 
     uint8_t ReadByte();
+    bool ReadBoolean();
     uint16_t ReadShort();
     uint32_t ReadInteger();
     float ReadFloat();
     glm::vec3 ReadVec3();
 
+
     void WriteByte(uint8_t value);
+    void WriteBoolean(bool value);
     void WriteShort(uint16_t value);
     void WriteInteger(uint32_t value);
     void WriteFloat(float value);
@@ -33,6 +36,7 @@ public:
     void Write(uint32_t value) { WriteInteger(value); }
     void Write(float value) { WriteFloat(value); }
     void Write(glm::vec3 value) { WriteVec3(value); }
+    void Write(bool value) { WriteBoolean(value); }
 private:
     std::vector<uint8_t> m_data;
     int m_offset = 0;

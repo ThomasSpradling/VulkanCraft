@@ -10,6 +10,7 @@
 #include "ChunkRenderer.h"
 
 // Sockets
+#define NOMINMAX
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 
@@ -46,7 +47,8 @@ private:
 private:
     float m_yaw = 90.0f;
     float m_pitch = 0.0f;
-    glm::vec3 m_current_position { 0.0f, 0.0f, 5.0f };
+    glm::vec3 m_player_direction { 0.0f, 0.0f, 0.0f };
+
     // Temporary for input testing
     glm::vec3 m_current_color = { 164.0f/256.0f, 30.0f/256.0f, 34.0f/256.0f };
 
@@ -67,11 +69,19 @@ private:
     std::unique_ptr<ChunkRenderer> m_chunk_renderer;
 
     double m_network_send_timer = 0.0;
+    double m_heartbeat_timer = 0.0;
     const int NETWORK_INPUT_SEND_RATE = 60; // Hz
+    const int HEART_RATE = 1; // Hz
+
+    std::vector<glm::vec3> m_player_positions;
+    std::vector<uint32_t> m_player_ids;
+
+    glm::vec3 m_current_position;
 
     SOCKET m_socket;
     addrinfo m_server_addrinfo;
     bool m_connected_server = false;
+    uint32_t m_player_id;
 private:
     void InitRenderTargets();
     void DestroyRenderTargets();
@@ -92,4 +102,5 @@ private:
 
     void ReceiveNetworkPackets();
     void SendNetworkPackets();
+    void SendHeartbeatPacket();
 };

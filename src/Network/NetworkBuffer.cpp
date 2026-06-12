@@ -17,6 +17,10 @@ uint8_t NetworkBuffer::ReadByte() {
     return static_cast<uint32_t>(m_data[m_offset++]);
 }
 
+bool NetworkBuffer::ReadBoolean() {
+    return static_cast<uint8_t>(ReadByte());
+}
+
 uint16_t NetworkBuffer::ReadShort() {
     uint16_t byte0 = m_data[m_offset];
     uint16_t byte1 = m_data[m_offset + 1];
@@ -48,6 +52,10 @@ glm::vec3 NetworkBuffer::ReadVec3() {
 
 void NetworkBuffer::WriteByte(uint8_t value) {
     m_data.push_back(value);
+}
+
+void NetworkBuffer::WriteBoolean(bool value) {
+    WriteByte(static_cast<uint8_t>(value));
 }
 
 void NetworkBuffer::WriteShort(uint16_t value) {

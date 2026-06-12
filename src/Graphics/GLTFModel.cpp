@@ -388,12 +388,11 @@ void GLTFModel::CleanUp() {
     m_descriptor_allocator->Destroy();
 }
 
-void GLTFModel::Draw(DrawContext &context) {
+void GLTFModel::Draw(DrawContext &context, const glm::mat4 &transform) {
     // for each node:
         // draw_node
 
     for (auto &node : m_nodes) {
-        // node->world_transform
         if (node->mesh == nullptr)
             continue;
 
@@ -402,7 +401,7 @@ void GLTFModel::Draw(DrawContext &context) {
                 .index_count = primitive.index_count,
                 .start_index = primitive.start_index,
                 .index_buffer = node->mesh->mesh_buffers.index_buffer,
-                .transform = node->world_transform,
+                .transform = transform * node->world_transform,
                 .vertex_buffer = node->mesh->mesh_buffers.device_address,
 
                 .pipeline = primitive.pipeline,

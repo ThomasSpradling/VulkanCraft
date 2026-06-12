@@ -78,7 +78,7 @@ public:
     void CleanUp();
     const std::vector<std::shared_ptr<GLTFMeshAsset>> &GetMeshes() const { return m_meshes; }
 
-    virtual void Draw(DrawContext &context) override;
+    virtual void Draw(DrawContext &context, const glm::mat4 &transform) override;
 private:
     const VulkanRenderer &m_renderer;
     const GLTFCoreData &m_core;

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <array>
 #include <glm/glm.hpp>
+#include "../Network/Address.h"
 
 // Sockets
+#define NOMINMAX
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 
@@ -12,18 +15,35 @@ public:
     void Run();
     void Update(float delta_time);
 private:
-    glm::vec3 m_current_position { 0.0f, 0.0f, 5.0f };
-    glm::vec3 m_current_movement_direction { 0.0f, 0.0f, 0.0f };
+    struct PlayerState {
+        glm::vec3 position { 0.0f, 0.0f, 5.0f };
+    };
+    
+    struct PlayerInput {
+        glm::vec3 movement_direction { 0.0f };
+    };
+
+    struct Client {
+        int id = -1;
+
+        NetworkAddress client_address;
+        size_t client_address_length;
+        double last_timestamp;
+
+        PlayerState player_state;
+        PlayerInput player_input;
+    };
+private:
     const int UPDATE_RATE = 60; // Hz
+    const int CLIENT_TIMEOUT = 5000; // ms
 
     double m_network_send_timer = 0.0;
     const int NETWORK_SNAPSHOT_RATE = 30; // Hz
 
     SOCKET m_socket;
-    bool m_connected_client = false;
 
-    sockaddr m_client_addr{};
-    int m_client_addr_length = sizeof(m_client_addr);
+    static const int MAX_CLIENTS = 32;
+    std::array<Client, MAX_CLIENTS> m_clients {};
 private:
     void Tick(float delta_time);
     void ReceiveNetworkPackets();

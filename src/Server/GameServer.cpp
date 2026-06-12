@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <optional>
+#include <thread>
 #include "../Network/Packets.h"
 
 void GameServer::Initialize() {
@@ -32,59 +33,18 @@ void GameServer::Initialize() {
         std::cerr << "Failed to bind!\n";
     }
 
-    std::cout << "Set Server Sockets!\n";
+    std::cout << "Server running at address on port!\n";
 
-    // Look for acknowledgement
-    NetworkBuffer buffer;
-    buffer.Resize(512);
-
-    sockaddr client_addr;
-    int client_addr_length = sizeof(client_addr);
-    int bytes_received = recvfrom(m_socket, buffer.GetData(), buffer.GetSize(), 0, &client_addr, &client_addr_length);
-
-    if (bytes_received == SOCKET_ERROR) {
-        std::cerr << "Error on recvfrom! " << WSAGetLastError() << std::endl;
-    }
-    
-    Packet recv_packet;
-    recv_packet.Read(buffer);
-    if (recv_packet.packet_type == PacketType::Ack) {
-        m_connected_client = true;
-        m_client_addr = client_addr;
-        m_client_addr_length = client_addr_length;
-
-        std::cout << "RECEIVED AN ACKNOWLEDGEMENT!\n";
-
-        Packet send_packet {
-            .packet_type = PacketType::Ack,
-        };
-
-        NetworkBuffer send_buffer;
-        send_packet.Write(send_buffer);
-
-        bytes_received = sendto(
-            m_socket,
-            send_buffer.GetData(),
-            static_cast<int>(send_buffer.GetSize()),
-            0,
-            &m_client_addr,
-            m_client_addr_length
-        );
-
-        if (bytes_received == SOCKET_ERROR) {
-            std::cerr << "Error on send to!\n";
-        }
-    }
-
-    u_long non_blocking = 1;
-    if (ioctlsocket(m_socket, FIONBIO, &non_blocking) == SOCKET_ERROR) {
+    u_long enabled = 1;
+    if (ioctlsocket(m_socket, FIONBIO, &enabled) == SOCKET_ERROR) {
         std::cerr << "Failed to set server socket non-blocking: " << WSAGetLastError() << "\n";
     }
 }
 
 void GameServer::Run() {
-    using clock = std::chrono::high_resolution_clock;
+    using clock = std::chrono::steady_clock;
 
+    Initialize();
     auto previous_time = clock::now();
 
     double update_accum = 0.0;
@@ -92,21 +52,35 @@ void GameServer::Run() {
     const double UPDATE_STEP_TIME = 1000.0 / UPDATE_RATE;
     constexpr double MAX_FRAME_WAIT_TIME_MS = 250.0;
 
-    Initialize();
     while (true) {
-        // poll events
-
         auto current_time = clock::now();
-        std::chrono::duration<double, std::milli> delta_time = current_time - previous_time;
+
+        std::chrono::duration<double, std::milli> delta_time =
+            current_time - previous_time;
+
         previous_time = current_time;
-        
-        update_accum += delta_time.count();
+
+        double frame_ms = std::min(delta_time.count(), MAX_FRAME_WAIT_TIME_MS);
+
+        update_accum += frame_ms;
 
         while (update_accum >= UPDATE_STEP_TIME) {
-            Update(UPDATE_STEP_TIME);
+            Update(static_cast<float>(UPDATE_STEP_TIME));
             update_accum -= UPDATE_STEP_TIME;
         }
+
+        if (update_accum < UPDATE_STEP_TIME) {
+            double sleep_ms = UPDATE_STEP_TIME - update_accum;
+
+            if (sleep_ms > 1.0) {
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double, std::milli>(sleep_ms)
+                );
+            }
+        }
     }
+
+    std::cout << "Server disconnected.\n";
 }
 
 void GameServer::Update(float delta_time) {
@@ -122,62 +96,129 @@ void GameServer::Update(float delta_time) {
 }
 
 void GameServer::Tick(float delta_time) {
-    m_current_position += m_current_movement_direction * 0.01f * delta_time;
-    m_current_movement_direction = glm::vec3(0.0f);
+    for (Client &client : m_clients) {
+        if (client.id == -1) {
+            continue;
+        }
+
+        client.player_state.position +=
+            client.player_input.movement_direction * 0.01f * delta_time;
+
+        client.player_input.movement_direction = glm::vec3(0.0f);
+        client.last_timestamp += delta_time;
+
+        if (client.last_timestamp > CLIENT_TIMEOUT) {
+            std::cout << "Client " << client.id << " timed out!\n";
+            client.client_address = {};
+            client.id = -1;
+        }
+    }
 }
 
 void GameServer::ReceiveNetworkPackets() {
     NetworkBuffer recv_buffer;
 
-    bool accepted_move_packet_this_update = false;
-
     while (true) {
+        //// Get a packet ////
         recv_buffer.Resize(512);
 
-        sockaddr client_addr{};
-        int client_addr_length = sizeof(client_addr);
+        sockaddr sock_client_addr{};
+        int client_addr_length = sizeof(sock_client_addr);
 
-        int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), static_cast<int>(recv_buffer.GetSize()), 0, &client_addr, &client_addr_length);
+        int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), static_cast<int>(recv_buffer.GetSize()), 0, &sock_client_addr, &client_addr_length);
         if (bytes_received == SOCKET_ERROR) {
             int error = WSAGetLastError();
-
-            if (error == WSAEWOULDBLOCK) {
-                break;
-            }
-
-            std::cerr << "Server recvfrom failed: " << error << "\n";
+            if (WSAGetLastError() != WSAEWOULDBLOCK)
+                std::cerr << "Server recvfrom failed: " << error << "\n";
             break;
         }
-
         recv_buffer.Resize(bytes_received);
+        NetworkAddress client_addr = FromSockAddr(sock_client_addr);
 
+        //// Process Packet Commands ////
         Packet packet;
         packet.Read(recv_buffer);
 
         switch (packet.packet_type) {
-            case PacketType::MovePlayer: {
-                if (accepted_move_packet_this_update) {
-                    break;
+            case PacketType::ClientJoin: {
+                int slot = -1;
+                for (uint32_t i = 0; i < MAX_CLIENTS; ++i) {
+                    if (m_clients[i].id == -1) {
+                        slot = i;
+                        break;
+                    }
                 }
+                
+                NetworkBuffer buffer;
+                Packet send_packet {
+                    .packet_type = PacketType::JoinResult,
+                };
 
-                const auto &packet_data = std::get<PacketMovePlayer>(packet.packet_data);
+                if (slot == -1) {
+                    // Too full!
+                    send_packet.packet_data = PacketJoinResult{
+                        .is_accepted = false,
+                        .player_id = 0,
+                    };
+                    send_packet.Write(buffer);
 
-                glm::vec3 movement_direction = packet_data.direction;
+                    sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length);
+                } else {
+                    std::cout << "NEW CLIENT: " << slot << "\n";
+                    send_packet.packet_data = PacketJoinResult{
+                        .is_accepted = true,
+                        .player_id = static_cast<uint32_t>(slot),
+                    };
+                    send_packet.Write(buffer);
 
-                if (movement_direction != glm::vec3(0.0f)) {
-                    movement_direction = glm::normalize(movement_direction);
+                    if (sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length) != SOCKET_ERROR) {
+                        m_clients[slot].id = slot;
+                        m_clients[slot].client_address = client_addr;
+                        m_clients[slot].client_address_length = client_addr_length;
+                        m_clients[slot].last_timestamp = 0.0f;
+                        m_clients[slot].player_state = {};
+                        m_clients[slot].player_input = {};
+                    }
                 }
-
-                m_current_movement_direction = movement_direction;
-
-                m_client_addr = client_addr;
-                m_client_addr_length = client_addr_length;
-
-                accepted_move_packet_this_update = true;
                 break;
             }
-
-            case PacketType::Ack:
+            case PacketType::ClientLeave: {
+                const auto &data = std::get<PacketClientLeave>(packet.packet_data);
+                if (m_clients[data.player_id].client_address == client_addr &&
+                    m_clients[data.player_id].id == data.player_id)
+                {
+                    std::cout << "Client " << data.player_id << " disconnected!\n";
+                    m_clients[data.player_id] = {
+                        .id = -1,
+                    };
+                }
+                break;
+            }
+            case PacketType::Heartbeat: {
+                const auto &data = std::get<PacketHeartbeat>(packet.packet_data);
+                if (m_clients[data.player_id].client_address == client_addr &&
+                    m_clients[data.player_id].id == data.player_id)
+                {
+                    m_clients[data.player_id].last_timestamp = 0.0f;
+                }
+                break;
+            }
+            case PacketType::MovePlayer: {
+                const auto &data = std::get<PacketMovePlayer>(packet.packet_data);
+                
+                if (m_clients[data.player_id].client_address == client_addr &&
+                    m_clients[data.player_id].id == data.player_id)
+                {
+                    glm::vec3 movement_direction = data.direction;
+                    if (movement_direction != glm::vec3(0.0f)) {
+                        movement_direction = glm::normalize(movement_direction);
+                    }
+                    
+                    m_clients[data.player_id].player_input.movement_direction = movement_direction;
+                    m_clients[data.player_id].last_timestamp = 0.0f;
+                }
+                break;
+            }
             case PacketType::Invalid:
             default:
                 break;
@@ -186,23 +227,36 @@ void GameServer::ReceiveNetworkPackets() {
 }
 
 void GameServer::SendNetworkPackets() {
-    if (!m_connected_client) {
-        return;
-    }
-
-    Packet packet {
-        .packet_type = PacketType::SetPosition,
-        .packet_data = PacketSetPosition{
-            .position = m_current_position,
-        }
-    };
-
     NetworkBuffer send_buffer;
+    Packet packet {
+        .packet_type = PacketType::PlayerState,
+    };
+    std::vector<uint32_t> player_ids {};
+    std::vector<glm::vec3> player_positions {};
+
+    uint32_t count = 0;
+    for (Client &client : m_clients) {
+        if (client.id != -1) {
+            player_ids.push_back(client.id);
+            player_positions.push_back(client.player_state.position);
+            
+            ++count;
+        }
+    }
+    packet.packet_data = PacketPlayerState{
+        .count = count,
+        .ids = player_ids,
+        .positions = player_positions,
+    };
     packet.Write(send_buffer);
 
-    int bytes_sent = sendto(m_socket, send_buffer.GetData(), static_cast<int>(send_buffer.GetSize()), 0, &m_client_addr, m_client_addr_length);
+    for (Client &client : m_clients) {
+        if (client.id != -1) {
+            sockaddr addr = ToSockAddr(client.client_address);
 
-    if (bytes_sent == SOCKET_ERROR) {
-        std::cerr << "Server sendto failed: " << WSAGetLastError() << "\n";
+            if (sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, &addr, sizeof(addr)) == SOCKET_ERROR) {
+                std::cerr << "Failed sendto!\n";
+            }
+        }
     }
 }

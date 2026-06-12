@@ -1,5 +1,6 @@
 #include "../Graphics/utils.h"
 #include <array>
+#include <glm/gtc/quaternion.hpp>
 #include <optional>
 #include <variant>
 
@@ -42,6 +43,21 @@ void GameClient::Initialize() {
 }
 
 void GameClient::ShutDown() {
+    // Disconnect from server
+    NetworkBuffer buffer;
+    Packet packet {
+        .packet_type = PacketType::ClientLeave,
+        .packet_data = PacketClientLeave{
+            .player_id = m_player_id,
+        }
+    };
+    packet.Write(buffer);
+
+    int bytes_sent = sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
+    if (bytes_sent == SOCKET_ERROR) {
+        std::cerr << "Error sendto\n";
+    }
+
     std::cout << "Game shutting down!" << std::endl;
 
     DestroyGeometry();
@@ -60,6 +76,12 @@ void GameClient::Update(float delta_time) {
         SendNetworkPackets();
     }
 
+    m_heartbeat_timer += delta_time;
+    if (m_heartbeat_timer >= 1000.0f / HEART_RATE) {
+        m_heartbeat_timer = 0.0;
+        SendHeartbeatPacket();
+    }
+
     const auto extent = m_renderer->DrawExtent();
 
     float aspect =
@@ -74,18 +96,28 @@ void GameClient::Update(float delta_time) {
     );
     projection[1][1] *= -1.0f;
 
-    glm::vec3 direction;
-    direction.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
-    direction.y = sin(glm::radians(m_pitch));
-    direction.z = -sin(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+    glm::vec3 forward;
+    forward.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+    forward.y = sin(glm::radians(m_pitch));
+    forward.z = -sin(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
+    forward = glm::normalize(forward);
 
-    glm::vec3 front = glm::normalize(direction);
-    glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
-    glm::vec3 up = glm::normalize(glm::cross(right, front));
+    glm::vec3 player_forward(forward.x, 0.0f, forward.z);
+
+    if (glm::length(player_forward) > 0.001f) {
+        player_forward = glm::normalize(player_forward);
+    } else {
+        player_forward = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    m_player_direction = player_forward;
+
+    glm::vec3 camera_position = m_current_position - player_forward * 5.0f + glm::vec3(0.0f, 1.0f, 0.0f) * 3.0f;
+    glm::vec3 camera_target = m_current_position + player_forward * 8.0f;
 
     glm::mat4 view = glm::lookAt(
-        m_current_position - front,
-        m_current_position,
+        camera_position,
+        camera_target,
         glm::vec3(0.0f, 1.0f, 0.0f)
     );
 
@@ -106,9 +138,19 @@ void GameClient::Render(std::optional<Frame> frame, float delta_time) {
 
     UpdateUniforms();
 
+    glm::vec3 forward = m_player_direction;
+    forward.y = 0.0f;
+    glm::mat4 rotate = glm::mat4_cast(glm::quatLookAtLH(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+    
     m_draw_context.opaque_objects.clear();
     m_draw_context.transparent_objects.clear();
-    m_model->Draw(m_draw_context);
+    
+    for (uint32_t i = 0; i < m_player_positions.size(); ++i) {
+        glm::vec3 pos = m_player_positions[i];
+        glm::mat4 translate = glm::translate(pos);
+        m_model->Draw(m_draw_context, translate * rotate);
+    }
 
     TransitionImageLayout(frame->cmd, frame->image, IMAGE_SUBRESOURCE_RANGE_COLOR, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     TransitionImageLayout(frame->cmd, m_frame_data[i].depth_image, IMAGE_SUBRESOURCE_RANGE_DEPTH, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
@@ -381,6 +423,8 @@ void GameClient::UpdateUniforms() {
 }
 
 void GameClient::InitClientSocket() {
+    //// Setup ////
+
     const std::string server_address = "127.0.0.1";
 
     WSADATA winsock_data;
@@ -405,10 +449,10 @@ void GameClient::InitClientSocket() {
 
     std::cout << "Set Client Sockets!\n";
 
+    //// Client ////
     NetworkBuffer buffer;
     Packet send_packet {
-        .packet_type = PacketType::Ack,
-        // .packet_data = std::monostate{},
+        .packet_type = PacketType::ClientJoin,
     };
     send_packet.Write(buffer);
     
@@ -430,9 +474,16 @@ void GameClient::InitClientSocket() {
 
     Packet recv_packet;
     recv_packet.Read(recv_buffer);
-    if (recv_packet.packet_type == PacketType::Ack) {
-        std::cout << "RECEIVED ACKNOWLEDGEMENT!\n";
+    if (recv_packet.packet_type == PacketType::JoinResult) {
         m_connected_server = true;
+        auto data = std::get<PacketJoinResult>(recv_packet.packet_data);
+        if (data.is_accepted) {
+            std::cerr << "Successfully connected to server!\n";
+            m_connected_server = true;
+            m_player_id = data.player_id;
+        } else {
+            std::cerr << "Could not connect to server!\n";
+        }
     }
 
     u_long non_blocking = 1;
@@ -467,12 +518,20 @@ void GameClient::ReceiveNetworkPackets() {
         packet.Read(recv_buffer);
 
         switch (packet.packet_type) {
-            case PacketType::SetPosition: {
-                const auto &packet_data = std::get<PacketSetPosition>(packet.packet_data);
-                m_current_position = packet_data.position;
+            case PacketType::PlayerState: {
+                const auto &packet_data = std::get<PacketPlayerState>(packet.packet_data);
+                m_player_positions = packet_data.positions;
+                m_player_ids = packet_data.ids;
+
+                for (uint32_t i = 0; i < m_player_positions.size(); ++i) {
+                    if (m_player_ids[i] == m_player_id) {
+                        m_current_position = m_player_positions[i];
+                    }
+                }
+                // std::cout << "RECEIVED STATE UPDATE: Current Postion = " << m_current_position.x << "," << m_current_position.y << "," << m_current_position.z << "\n";
                 break;
             }
-            case PacketType::Ack:
+            case PacketType::JoinResult:
             default:
                 break;
         }
@@ -500,6 +559,7 @@ void GameClient::SendNetworkPackets() {
         Packet packet {
             .packet_type = PacketType::MovePlayer,
             .packet_data = PacketMovePlayer {
+                .player_id = m_player_id,
                 .direction = player_direction,
             },
         };
@@ -511,5 +571,19 @@ void GameClient::SendNetworkPackets() {
         if (bytes == SOCKET_ERROR) {
             std::cerr << "Failed sendto: " << WSAGetLastError() << "\n";
         }
+    }
+}
+
+void GameClient::SendHeartbeatPacket() {
+    NetworkBuffer buffer;
+    Packet packet { 
+        .packet_type = PacketType::Heartbeat,
+        .packet_data = PacketHeartbeat{
+            .player_id = m_player_id,
+        }
+    };
+    packet.Write(buffer);
+    if (sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen) == SOCKET_ERROR) {
+        std::cerr << "Failed to send heartbeat!\n";
     }
 }

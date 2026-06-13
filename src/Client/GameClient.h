@@ -72,6 +72,7 @@ private:
 
     DrawContext m_draw_context;
 
+    // std::vector<Chunk> m_chunks;
     std::unique_ptr<ChunkRenderer> m_chunk_renderer;
 
     double m_network_send_timer = 0.0;

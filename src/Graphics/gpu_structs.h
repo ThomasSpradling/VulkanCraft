@@ -36,6 +36,8 @@ struct MeshVertex {
 };
 
 struct GPUMesh {
+    uint32_t index_count = 0;
+
     VkBuffer vertex_buffer;
     VmaAllocation vertex_buffer_alloc;
 

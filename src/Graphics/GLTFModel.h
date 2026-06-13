@@ -9,7 +9,6 @@
 #include <memory>
 #include <vector>
 
-#define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
 struct MeshPrimitive {

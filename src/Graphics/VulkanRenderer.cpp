@@ -8,13 +8,15 @@
 #include <string>
 #include <vector>
 #include <vulkan/vulkan_core.h>
+#include "gpu_structs.h"
 #include "utils.h"
 #include "../errors.h"
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
-
 #include "VulkanRenderer.h"
+
+#include <stb_image.h>
 
 VulkanRenderer::VulkanRenderer(GLFWwindow &window) 
     : m_window(window)
@@ -236,8 +238,9 @@ void VulkanRenderer::WriteDescriptorImage(uint32_t binding, VkDescriptorSet desc
 
 VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) const {
     std::ifstream file(file_path, std::ios::ate | std::ios::binary);
-    if (!file.is_open())
-        std::cerr << "Failed to load shader at path '" << file_path << "'.\n";
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to load shader at path '" + file_path + "'.");
+    }
 
     size_t file_size = static_cast<size_t>(file.tellg());
 
@@ -260,16 +263,163 @@ VkShaderModule VulkanRenderer::LoadShader(const std::string &file_path) const {
     };
     
     VkShaderModule shader_module;
-    vkCreateShaderModule(m_device, &create_info, nullptr, &shader_module);
+    VK_CHECK(vkCreateShaderModule(m_device, &create_info, nullptr, &shader_module));
     return shader_module;
 }
+
+GPUImage VulkanRenderer::LoadImage2D(const std::string &file_path, VkImageLayout dest_layout) const {
+    //// Load data from file ////
+    int width = 0;
+    int height = 0;
+    int num_channels = 0;
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char *data = stbi_load(file_path.data(), &width, &height, &num_channels, STBI_rgb_alpha);
+    stbi_set_flip_vertically_on_load(false);
+    if (!data) {
+        throw std::runtime_error(std::format("Failed to load image at {}: {}", file_path, stbi_failure_reason()));
+    }
+    const int image_size = width * height * 4;
+
+    std::vector<uint8_t> image_data;
+    image_data.assign(data, data + image_size);
+    stbi_image_free(data);
+
+    /// Create GPU Structures ////
+    GPUImage result {
+        .extent = VkExtent3D{
+            .width = static_cast<uint32_t>(width),
+            .height = static_cast<uint32_t>(height),
+            .depth = 1,
+        },
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+
+    VkImageCreateInfo image_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = result.format,
+        .extent = result.extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    VmaAllocationCreateInfo allocation_create_info {
+        .flags = 0,
+        .usage = VMA_MEMORY_USAGE_AUTO,
+    };
+    VK_CHECK(vmaCreateImage(m_allocator, &image_create_info, &allocation_create_info, &result.image, &result.allocation, nullptr));
+
+    VkImageViewCreateInfo image_view_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = result.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = result.format,
+        .components = COMPONENT_MAPPING_DEFAULT,
+        .subresourceRange = IMAGE_SUBRESOURCE_RANGE_ALL,
+    };
+    VK_CHECK(vkCreateImageView(m_device, &image_view_create_info, nullptr, &result.image_view));
+
+    //// Upload to GPU ////
+    LoadImageData(result, image_data.data(), dest_layout);
+    return result;
+}
+
+GPUImage VulkanRenderer::LoadImageArray2D(const std::vector<std::string> &file_paths, VkImageLayout dest_layout) const {
+    int num_layers = file_paths.size();
+    std::vector<std::vector<uint8_t>> image_data {};
+    image_data.resize(num_layers);
+
+    //// Load data from file ////
+    int width = 0;
+    int height = 0;
+    int num_channels = 0;
+    for (uint32_t i = 0; i < num_layers; ++i) {
+        int temp_width = 0;
+        int temp_height = 0;
+        int temp_num_channels = 0;
+        stbi_set_flip_vertically_on_load(true);
+        unsigned char *data = stbi_load(file_paths[i].data(), &temp_width, &temp_height, &temp_num_channels, STBI_rgb_alpha);
+        stbi_set_flip_vertically_on_load(false);
+        if (!data)
+            throw std::runtime_error(std::format("Failed to load image at {}: {}", file_paths[i], stbi_failure_reason()));
+
+        if (i == 0) {
+            width = temp_width;
+            height = temp_height;
+            num_channels = temp_num_channels;
+        } else {
+            Assert(width == temp_width && height == temp_height, "Mismatching dimensions loaded from Image Array!");
+            Assert(num_channels == temp_num_channels, "Mismatching format loaded from Image Array!");
+        }
+        
+        const int image_size = width * height * 4;
+        image_data[i].assign(data, data + image_size);
+        stbi_image_free(data);
+    }
+
+    /// Create GPU Structures ////
+    GPUImage result {
+        .extent = VkExtent3D{
+            .width = static_cast<uint32_t>(width),
+            .height = static_cast<uint32_t>(height),
+            .depth = 1,
+        },
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+
+    VkImageCreateInfo image_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = result.format,
+        .extent = result.extent,
+        .mipLevels = 1,
+        .arrayLayers = static_cast<uint32_t>(num_layers),
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    VmaAllocationCreateInfo allocation_create_info {
+        .flags = 0,
+        .usage = VMA_MEMORY_USAGE_AUTO,
+    };
+    VK_CHECK(vmaCreateImage(m_allocator, &image_create_info, &allocation_create_info, &result.image, &result.allocation, nullptr));
+
+    VkImageViewCreateInfo image_view_create_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = result.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        .format = result.format,
+        .components = COMPONENT_MAPPING_DEFAULT,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = static_cast<uint32_t>(num_layers),
+        },
+    };
+    VK_CHECK(vkCreateImageView(m_device, &image_view_create_info, nullptr, &result.image_view));
+
+    //// Upload to GPU ////
+    for (uint32_t i = 0; i < num_layers; ++i) {
+        LoadImageData(result, image_data[i].data(), dest_layout, i);
+    }
+    return result;
+}
+
 
 void VulkanRenderer::DestroyGPUMesh(const GPUMesh &mesh) const {
     vmaDestroyBuffer(m_allocator, mesh.vertex_buffer, mesh.vertex_buffer_alloc);
     vmaDestroyBuffer(m_allocator, mesh.index_buffer, mesh.index_buffer_alloc);
 }
 
-void VulkanRenderer::LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout) const {
+void VulkanRenderer::LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout, uint32_t layer) const {
     // TODO: Also add option to generate mipmaps
     if (image.image == VK_NULL_HANDLE)
         throw std::runtime_error("Cannot load data into a null image.");
@@ -308,7 +458,7 @@ void VulkanRenderer::LoadImageData(const GPUImage &image, void *data, VkImageLay
             .imageSubresource = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
-                .baseArrayLayer = 0,
+                .baseArrayLayer = layer,
                 .layerCount = 1,
             },
             .imageExtent = image.extent,

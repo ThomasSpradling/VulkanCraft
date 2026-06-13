@@ -1,16 +1,8 @@
 #pragma once
 
 #include "../Graphics/VulkanRenderer.h"
+#include "Chunk.h"
 #include <vector>
-
-struct BlockVertex {
-    // TODO: Encode
-    glm::vec3 position;
-    float uv_x;
-    glm::vec3 normal;
-    float uv_y;
-    // uint32_t block_id;
-};
 
 /**
  * @brief Handles the rendering of all chunks in the world.
@@ -21,7 +13,7 @@ public:
     void Init(VkDescriptorSetLayout global_layout);
     void Destroy();
 
-    void LoadChunkMesh();
+    void LoadChunkMesh(const Chunk &chunk, glm::ivec2 chunk_offset);
     void FreeChunkMesh();
 
     void Draw(VkCommandBuffer cmd, VkDescriptorSet global_descriptor_set);
@@ -41,9 +33,18 @@ private:
 private:
     const VulkanRenderer &m_renderer;
 
+    std::unique_ptr<DescriptorAllocator> m_descriptor_allocator;
+    VkDescriptorSetLayout m_block_texture_layout = VK_NULL_HANDLE;
+    VkDescriptorSet m_block_texture_descriptor_set = VK_NULL_HANDLE;
+    VkSampler m_block_texture_sampler = VK_NULL_HANDLE;
+
+    GPUImage m_block_texture_array;
+
     PushConstantData m_push_constants;
 
     VkPipeline m_opaque_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_opaque_pipeline_layout = VK_NULL_HANDLE;
     std::vector<ChunkRenderData> m_chunk_data;
+private:
+    void InitializeTextures();
 };

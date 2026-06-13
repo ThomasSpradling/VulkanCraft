@@ -7,12 +7,17 @@
 
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec2 v_uv;
+layout(location = 2) out int v_texture_id;
 
 struct Vertex {
     vec3 position;
     float uv_x;
     vec3 normal;
     float uv_y;
+    int texture_id;
+    int pad0;
+    int pad1;
+    int pad2;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -35,4 +40,5 @@ void main() {
 
     v_uv.x = v.uv_x;
     v_uv.y = v.uv_y;
+    v_texture_id = v.texture_id;
 }

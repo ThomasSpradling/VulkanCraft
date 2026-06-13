@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan_core.h>
 
 struct RenderProperties {
     const uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
@@ -94,6 +95,9 @@ public:
 
     VkShaderModule LoadShader(const std::string &file_path) const;
 
+    GPUImage LoadImage2D(const std::string &file_path, VkImageLayout dest_layout = VK_IMAGE_LAYOUT_UNDEFINED) const;
+    GPUImage LoadImageArray2D(const std::vector<std::string> &file_paths, VkImageLayout dest_layout = VK_IMAGE_LAYOUT_UNDEFINED) const;
+    
     // Upload CPU mesh data to GPU buffers. The buffers MUST then be managed by the caller.
     // GPUMesh UploadGPUMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) const;
 
@@ -148,6 +152,7 @@ public:
         VkDeviceAddress address = vkGetBufferDeviceAddress(m_device, &buffer_device_address_info);
 
         return GPUMesh {
+            .index_count = static_cast<uint32_t>(indices.size()),
             .vertex_buffer = vertex_buffer,
             .vertex_buffer_alloc = vertex_buffer_alloc,
             .index_buffer = index_buffer,
@@ -160,7 +165,7 @@ public:
     void DestroyGPUMesh(const GPUMesh &mesh) const;
 
     // Note: Requires target image to have usage `VK_IMAGE_USAGE_TRANSFER_DST_BIT`
-    void LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout = VK_IMAGE_LAYOUT_UNDEFINED) const;
+    void LoadImageData(const GPUImage &image, void *data, VkImageLayout dst_layout = VK_IMAGE_LAYOUT_UNDEFINED, uint32_t layer = 0) const;
 public:
     // Loads the data into a buffer that has already been allocated. Offsets and sizes are represented in bytes.
     // Note: Requires target buffer to have usage `VK_IMAGE_USAGE_TRANSFER_DST_BIT`

@@ -2,6 +2,8 @@ build
 .cache
 .vs
 .vscode
-resources/models
-resources/shaders/**/*.spv
-resources/texts
+Assets/models
+Assets/shaders/**/*.spv
+Assets/texts
+Assets/raw
+Assets/data/*.py

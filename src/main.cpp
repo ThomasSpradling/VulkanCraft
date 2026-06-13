@@ -16,11 +16,12 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    std::shared_ptr<IGame> game = std::make_shared<GameClient>();
+    Application app{game};
     try {
-        std::shared_ptr<IGame> game = std::make_shared<GameClient>();
-        Application app{game};
         app.Run();
     } catch (const std::runtime_error &error) {
+        std::cout << "AJENHUNNFUSJF\n";
         std::cerr << "\033[31mRuntime Error: " << error.what() << "\033[0m\n";
         exit(1);
     }

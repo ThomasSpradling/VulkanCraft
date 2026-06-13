@@ -280,7 +280,7 @@ void GameClient::DestroyRenderTargets() {
 }
 
 void GameClient::InitGeometry() {
-    m_model = std::make_shared<GLTFModel>(*m_renderer, m_gltf_common_data, RESOURCE_PATH "/models/DamagedHelmet.glb");
+    m_model = std::make_shared<GLTFModel>(*m_renderer, m_gltf_common_data, ASSET_PATH "/models/DamagedHelmet.glb");
 }
 
 void GameClient::DestroyGeometry() {
@@ -346,8 +346,8 @@ void GameClient::InitPipelines() {
         .offset = 0,
         .size = sizeof(PushConstantData),
     };
-    VkShaderModule vertex_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/gltf/mesh.vert.spv");
-    VkShaderModule fragment_shader_module = m_renderer->LoadShader(RESOURCE_PATH "/shaders/gltf/mesh.frag.spv");
+    VkShaderModule vertex_shader_module = m_renderer->LoadShader(ASSET_PATH "/shaders/gltf/mesh.vert.spv");
+    VkShaderModule fragment_shader_module = m_renderer->LoadShader(ASSET_PATH "/shaders/gltf/mesh.frag.spv");
 
     std::vector<VkDescriptorSetLayout> descriptor_set_layouts {
         m_global_layout,
@@ -417,7 +417,7 @@ void GameClient::UpdateUniforms() {
     SceneData *device_scene_data = static_cast<SceneData *>(allocation_info.pMappedData);
     device_scene_data->ambient_color = glm::vec4(0.2f);
     device_scene_data->sunlight_color = glm::vec4(1.0f);
-    device_scene_data->sunlight_direction = glm::vec4(1.0f, -1.0f, 0.0f, 3.0f);
+    device_scene_data->sunlight_direction = glm::vec4(glm::normalize(glm::vec3(1.0f, -1.0f, -2.0f)), 3.0f);
     device_scene_data->projection = m_scene_data.projection;
     device_scene_data->view = m_scene_data.view;
     device_scene_data->view_projection = m_scene_data.projection * m_scene_data.view;

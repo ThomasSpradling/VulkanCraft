@@ -14,8 +14,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Resource Paths
-add_compile_definitions(RESOURCE_PATH="${CMAKE_SOURCE_DIR}/resources")
+# Assets Paths
+add_compile_definitions(ASSET_PATH="${CMAKE_SOURCE_DIR}/Assets")
 
 
 # Dependencies
@@ -30,11 +30,7 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/glfw SYSTEM)
 
 ## STB
-add_library(stb
-    third_party/stb/stb_image_write.cpp
-    third_party/stb/stb_image.cpp
-)
-target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+# target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
 
 ## Checksum generation
 add_library(crc32 third_party/crc32/crc32.cpp)
@@ -103,7 +99,6 @@ target_link_options(${PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${PROJECT_NAME}
-    stb
     glfw
     glm::glm
     volk::volk

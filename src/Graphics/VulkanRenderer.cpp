@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <format>
 #include <fstream>
@@ -655,6 +656,11 @@ void VulkanRenderer::InitVulkanDevice() {
     vkEnumeratePhysicalDeviceGroups(m_instance, &device_group_count, nullptr);
 
     std::vector<VkPhysicalDeviceGroupProperties> device_groups(device_group_count);
+    std::for_each(device_groups.begin(), device_groups.end(), [](VkPhysicalDeviceGroupProperties &props) {
+        props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES,
+        props.pNext = nullptr;
+    });
+
     vkEnumeratePhysicalDeviceGroups(m_instance, &device_group_count, device_groups.data());
 
     for (const auto &group : device_groups) {
@@ -927,7 +933,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
     }
 
     // Choose present mode
-    VkPresentModeKHR present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
     {
         uint32_t present_modes_count = 0;
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface, &present_modes_count, nullptr));
@@ -937,18 +943,38 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
         std::vector<VkPresentModeKHR> present_modes(present_modes_count);
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device, m_surface, &present_modes_count, present_modes.data()));
     
-        // if (m_props.enable_vsync) {
-            for (const auto &mode : present_modes) {
-                if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                    present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+        if (m_props.enable_vsync) {
+            // guaranteed by spec to be present
+            present_mode = VK_PRESENT_MODE_FIFO_KHR;
+        } else {
+            std::vector<VkPresentModeKHR> preferred_present_modes {
+                VK_PRESENT_MODE_IMMEDIATE_KHR,
+                VK_PRESENT_MODE_MAILBOX_KHR,
+                VK_PRESENT_MODE_FIFO_KHR,
+            };
+
+            for (auto mode : preferred_present_modes) {
+                if (std::find(present_modes.begin(), present_modes.end(), mode) != present_modes.end()) {
+                    present_mode = mode;
                     break;
                 }
-
-                if (mode == VK_PRESENT_MODE_FIFO_KHR) {
-                    present_mode = VK_PRESENT_MODE_FIFO_KHR;
-                }
             }
-        // }
+        }
+
+        std::string chosen_mode = "";
+        switch (present_mode) {
+            case VK_PRESENT_MODE_MAILBOX_KHR:
+            chosen_mode = "MAILBOX";
+            break;
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:
+                chosen_mode = "IMMEDIATE";
+                break;
+            case VK_PRESENT_MODE_FIFO_KHR:
+            default:
+                chosen_mode = "FIFO";
+                break;
+        }
+        std::cout << "Chose presentation mode: " << chosen_mode << "\n";
     }
 
     // Choose extent
@@ -966,7 +992,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
     }
 
     // Choose pre-transform
-    VkSurfaceTransformFlagBitsKHR pre_transform;
+    VkSurfaceTransformFlagBitsKHR pre_transform = surface_capabilities.currentTransform;
     if (surface_capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
         pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     }
@@ -999,7 +1025,7 @@ void VulkanRenderer::CreateSwapChain(const VkExtent2D &extent) {
         .imageColorSpace = swapchain_format.colorSpace,
         .imageExtent = m_swapchain_extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageUsage = 0,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = pre_transform,
         .compositeAlpha = composite_alpha,
@@ -1120,7 +1146,7 @@ void VulkanRenderer::ResizeSwapChain() {
     vkDeviceWaitIdle(m_device);
 
     int width, height;
-    glfwGetWindowSize(&m_window, &width, &height);
+    glfwGetFramebufferSize(&m_window, &width, &height);
     m_props.window_extent.width = width;
     m_props.window_extent.height = height;
 

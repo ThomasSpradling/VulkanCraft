@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include "../../errors.h"
-#include "../NetworkBuffer.h"
+#include "../../Platform/Sockets/NetworkBuffer.h"
 
 struct PacketJoinResult {
     bool is_accepted;

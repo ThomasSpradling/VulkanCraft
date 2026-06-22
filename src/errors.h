@@ -6,7 +6,7 @@
 
 template<typename T>
 inline void Assert(T &&assertion, const std::string &message, const char *file = "", const int line = 0) {
-    if (!assertion) {
+    if (!std::forward<T>(assertion)) {
         std::ostringstream oss;
         oss << "Assertion failed";
         if (line > 0)

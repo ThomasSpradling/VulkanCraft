@@ -24,8 +24,8 @@ Application::Application(std::shared_ptr<IGame> game)
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwSetErrorCallback(GlfwErrorCallback);
 
-    const int width = 1920;
-    const int height = 1080;
+    const int width = 1280;
+    const int height = 720;
     const char *title = "Tiny Minecraft";
     m_window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!m_window) {

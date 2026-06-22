@@ -36,11 +36,11 @@ void GameServer::Initialize() {
         std::cerr << "Failed to bind!\n";
     }
 
-    std::cout << "Server listening at address "
-        << GetHostName(address_info->ai_family, *(address_info->ai_addr))
-        << " on port "
-        << PROTOCOL_PORT
-        << ".\n";
+    // std::cout << "Server listening at address "
+    //     << GetHostName(address_info->ai_family, *(address_info->ai_addr))
+    //     << " on port "
+    //     << PROTOCOL_PORT
+    //     << ".\n";
 
     u_long enabled = 1;
     if (ioctlsocket(m_socket, FIONBIO, &enabled) == SOCKET_ERROR) {
@@ -118,146 +118,146 @@ void GameServer::Tick(float delta_time) {
 
         if (client.last_timestamp > CLIENT_TIMEOUT) {
             std::cout << "Client " << client.id << " timed out!\n";
-            client.client_address = {};
+            // client.client_address = {};
             client.id = -1;
         }
     }
 }
 
 void GameServer::ReceiveNetworkPackets() {
-    NetworkBuffer recv_buffer;
+    // NetworkBuffer recv_buffer;
 
-    while (true) {
-        //// Get a packet ////
-        recv_buffer.Resize(512);
+    // while (true) {
+    //     //// Get a packet ////
+    //     recv_buffer.Resize(512);
 
-        sockaddr sock_client_addr{};
-        int client_addr_length = sizeof(sock_client_addr);
+    //     sockaddr sock_client_addr{};
+    //     int client_addr_length = sizeof(sock_client_addr);
 
-        int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), static_cast<int>(recv_buffer.GetSize()), 0, &sock_client_addr, &client_addr_length);
-        if (bytes_received == SOCKET_ERROR) {
-            int error = WSAGetLastError();
-            if (WSAGetLastError() != WSAEWOULDBLOCK)
-                std::cerr << "Server recvfrom failed: " << error << "\n";
-            break;
-        }
-        recv_buffer.Resize(bytes_received);
-        NetworkAddress client_addr = FromSockAddr(sock_client_addr);
+    //     int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), static_cast<int>(recv_buffer.GetSize()), 0, &sock_client_addr, &client_addr_length);
+    //     if (bytes_received == SOCKET_ERROR) {
+    //         int error = WSAGetLastError();
+    //         if (WSAGetLastError() != WSAEWOULDBLOCK)
+    //             std::cerr << "Server recvfrom failed: " << error << "\n";
+    //         break;
+    //     }
+    //     recv_buffer.Resize(bytes_received);
+    //     NetworkAddress client_addr = FromSockAddr(sock_client_addr);
 
-        //// Process Packet Commands ////
-        Packet packet;
-        PacketError err = packet.Read(recv_buffer);
-        if (err == PacketError::ChecksumError) {
-            std::cerr << "Packet dropped due to mismatching checksum.\n";
-            continue;
-        }
+    //     //// Process Packet Commands ////
+    //     Packet packet;
+    //     PacketError err = packet.Read(recv_buffer);
+    //     if (err == PacketError::ChecksumError) {
+    //         std::cerr << "Packet dropped due to mismatching checksum.\n";
+    //         continue;
+    //     }
 
-        if (err == PacketError::ChecksumError) {
-            std::cerr << "Packet dropped due to serialization error.\n";
-            continue;
-        }
+    //     if (err == PacketError::ChecksumError) {
+    //         std::cerr << "Packet dropped due to serialization error.\n";
+    //         continue;
+    //     }
 
-        switch (packet.packet_type) {
-            case PacketType::ClientJoin: {
-                int slot = -1;
-                for (uint32_t i = 0; i < MAX_CLIENTS; ++i) {
-                    if (m_clients[i].id == -1) {
-                        slot = i;
-                        break;
-                    }
-                }
+    //     switch (packet.packet_type) {
+    //         case PacketType::ClientJoin: {
+    //             int slot = -1;
+    //             for (uint32_t i = 0; i < MAX_CLIENTS; ++i) {
+    //                 if (m_clients[i].id == -1) {
+    //                     slot = i;
+    //                     break;
+    //                 }
+    //             }
                 
-                NetworkBuffer buffer;
-                Packet send_packet {
-                    .packet_type = PacketType::JoinResult,
-                };
+    //             NetworkBuffer buffer;
+    //             Packet send_packet {
+    //                 .packet_type = PacketType::JoinResult,
+    //             };
 
-                if (slot == -1) {
-                    // Too full!
-                    send_packet.packet_data = PacketJoinResult{
-                        .is_accepted = false,
-                        .player_id = 0,
-                    };
-                    send_packet.Write(buffer);
+    //             if (slot == -1) {
+    //                 // Too full!
+    //                 send_packet.packet_data = PacketJoinResult{
+    //                     .is_accepted = false,
+    //                     .player_id = 0,
+    //                 };
+    //                 send_packet.Write(buffer);
 
-                    sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length);
-                } else {
-                    std::cout << "Client " << slot << " connected"
-                        << " from "
-                        << GetHostName(m_address_info->ai_family, sock_client_addr)
-                        << " on port "
-                        << client_addr.port
-                        << ".\n";
-                    send_packet.packet_data = PacketJoinResult{
-                        .is_accepted = true,
-                        .player_id = static_cast<uint32_t>(slot),
-                    };
-                    send_packet.Write(buffer);
+    //                 sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length);
+    //             } else {
+    //                 std::cout << "Client " << slot << " connected"
+    //                     << " from "
+    //                     << GetHostName(m_address_info->ai_family, sock_client_addr)
+    //                     << " on port "
+    //                     << client_addr.port
+    //                     << ".\n";
+    //                 send_packet.packet_data = PacketJoinResult{
+    //                     .is_accepted = true,
+    //                     .player_id = static_cast<uint32_t>(slot),
+    //                 };
+    //                 send_packet.Write(buffer);
 
-                    if (sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length) != SOCKET_ERROR) {
-                        m_clients[slot].id = slot;
-                        m_clients[slot].client_address = client_addr;
-                        m_clients[slot].client_address_length = client_addr_length;
-                        m_clients[slot].last_timestamp = 0.0f;
-                        m_clients[slot].player_state = {};
-                        m_clients[slot].player_input = {};
-                    }
-                }
-                break;
-            }
-            case PacketType::ClientLeave: {
-                const auto &data = std::get<PacketClientLeave>(packet.packet_data);
-                if (m_clients[data.player_id].client_address == client_addr &&
-                    m_clients[data.player_id].id == data.player_id)
-                {
-                    std::cout << "Client " << data.player_id << " disconnected!\n";
-                    m_clients[data.player_id] = {
-                        .id = -1,
-                    };
-                }
-                break;
-            }
-            case PacketType::Heartbeat: {
-                const auto &data = std::get<PacketHeartbeat>(packet.packet_data);
-                if (m_clients[data.player_id].client_address == client_addr &&
-                    m_clients[data.player_id].id == data.player_id)
-                {
-                    m_clients[data.player_id].last_timestamp = 0.0f;
-                }
-                break;
-            }
-            case PacketType::MovePlayer: {
-                const auto &data = std::get<PacketMovePlayer>(packet.packet_data);
+    //                 if (sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, &sock_client_addr, client_addr_length) != SOCKET_ERROR) {
+    //                     m_clients[slot].id = slot;
+    //                     m_clients[slot].client_address = client_addr;
+    //                     m_clients[slot].client_address_length = client_addr_length;
+    //                     m_clients[slot].last_timestamp = 0.0f;
+    //                     m_clients[slot].player_state = {};
+    //                     m_clients[slot].player_input = {};
+    //                 }
+    //             }
+    //             break;
+    //         }
+    //         case PacketType::ClientLeave: {
+    //             const auto &data = std::get<PacketClientLeave>(packet.packet_data);
+    //             if (m_clients[data.player_id].client_address == client_addr &&
+    //                 m_clients[data.player_id].id == data.player_id)
+    //             {
+    //                 std::cout << "Client " << data.player_id << " disconnected!\n";
+    //                 m_clients[data.player_id] = {
+    //                     .id = -1,
+    //                 };
+    //             }
+    //             break;
+    //         }
+    //         case PacketType::Heartbeat: {
+    //             const auto &data = std::get<PacketHeartbeat>(packet.packet_data);
+    //             if (m_clients[data.player_id].client_address == client_addr &&
+    //                 m_clients[data.player_id].id == data.player_id)
+    //             {
+    //                 m_clients[data.player_id].last_timestamp = 0.0f;
+    //             }
+    //             break;
+    //         }
+    //         case PacketType::MovePlayer: {
+    //             const auto &data = std::get<PacketMovePlayer>(packet.packet_data);
                 
-                if (m_clients[data.player_id].client_address == client_addr &&
-                    m_clients[data.player_id].id == data.player_id)
-                {
-                    glm::vec3 movement_direction = data.direction;
-                    if (movement_direction != glm::vec3(0.0f)) {
-                        movement_direction = glm::normalize(movement_direction);
-                    }
+    //             if (m_clients[data.player_id].client_address == client_addr &&
+    //                 m_clients[data.player_id].id == data.player_id)
+    //             {
+    //                 glm::vec3 movement_direction = data.direction;
+    //                 if (movement_direction != glm::vec3(0.0f)) {
+    //                     movement_direction = glm::normalize(movement_direction);
+    //                 }
                     
-                    m_clients[data.player_id].player_input.movement_direction = movement_direction;
-                    m_clients[data.player_id].last_timestamp = 0.0f;
-                }
-                break;
-            }
-            case PacketType::ChangeView: {
-                const auto &data = std::get<PacketChangeView>(packet.packet_data);
+    //                 m_clients[data.player_id].player_input.movement_direction = movement_direction;
+    //                 m_clients[data.player_id].last_timestamp = 0.0f;
+    //             }
+    //             break;
+    //         }
+    //         case PacketType::ChangeView: {
+    //             const auto &data = std::get<PacketChangeView>(packet.packet_data);
                 
-                if (m_clients[data.player_id].client_address == client_addr &&
-                    m_clients[data.player_id].id == data.player_id)
-                {   
-                    m_clients[data.player_id].player_input.yaw = data.yaw;
-                    m_clients[data.player_id].player_input.pitch = data.pitch;
-                }
-                break;
-            }
-            case PacketType::Invalid:
-            default:
-                break;
-        }
-    }
+    //             if (m_clients[data.player_id].client_address == client_addr &&
+    //                 m_clients[data.player_id].id == data.player_id)
+    //             {   
+    //                 m_clients[data.player_id].player_input.yaw = data.yaw;
+    //                 m_clients[data.player_id].player_input.pitch = data.pitch;
+    //             }
+    //             break;
+    //         }
+    //         case PacketType::Invalid:
+    //         default:
+    //             break;
+    //     }
+    // }
 }
 
 void GameServer::SendNetworkPackets() {
@@ -286,13 +286,13 @@ void GameServer::SendNetworkPackets() {
     };
     packet.Write(send_buffer);
 
-    for (Client &client : m_clients) {
-        if (client.id != -1) {
-            sockaddr addr = ToSockAddr(client.client_address);
+    // for (Client &client : m_clients) {
+    //     if (client.id != -1) {
+    //         // sockaddr addr = ToSockAddr(client.client_address);
 
-            if (sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, &addr, sizeof(addr)) == SOCKET_ERROR) {
-                std::cerr << "Failed sendto!\n";
-            }
-        }
-    }
+    //         if (sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, &addr, sizeof(addr)) == SOCKET_ERROR) {
+    //             std::cerr << "Failed sendto!\n";
+    //         }
+    //     }
+    // }
 }

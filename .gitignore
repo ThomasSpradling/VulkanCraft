@@ -7,3 +7,6 @@ Assets/shaders/**/*.spv
 Assets/texts
 Assets/raw
 Assets/data/*.py
+
+CMakePresets.json
+Scripts

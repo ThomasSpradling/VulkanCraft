@@ -8,6 +8,7 @@ void DescriptorAllocator::Init(uint32_t max_sets, const std::vector<DescriptorPo
     m_sets_per_pool = max_sets;
     VkDescriptorPool pool = CreateDescriptorPool();
     m_sets_per_pool = max_sets * 1.5f;
+    m_ratios = ratios;
     m_ready_pools.push_back(pool);
 }
     

@@ -18,7 +18,7 @@
 #include <vulkan/vulkan_core.h>
 
 struct RenderProperties {
-    const uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
+    uint32_t vulkan_version = VK_MAKE_API_VERSION(0, 1, 3, 0);
 
     bool enable_validation = false;
 

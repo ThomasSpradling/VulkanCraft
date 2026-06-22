@@ -9,7 +9,10 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 
-class GameServer {
+#include "../Utils/NonCopyable.h"
+#include "../Utils/NonMovable.h"
+
+class GameServer : public NonCopyable, public NonMovable {
 public:
     void Initialize();
     void Run();
@@ -30,9 +33,9 @@ private:
     struct Client {
         int id = -1;
 
-        NetworkAddress client_address;
-        size_t client_address_length;
-        double last_timestamp;
+        // NetworkAddress client_address;
+        size_t client_address_length = 0;
+        double last_timestamp = 0.0;
 
         PlayerState player_state;
         PlayerInput player_input;
@@ -44,7 +47,7 @@ private:
     double m_network_send_timer = 0.0;
     const int NETWORK_SNAPSHOT_RATE = 30; // Hz
 
-    SOCKET m_socket;
+    SOCKET m_socket {};
 
     static const int MAX_CLIENTS = 32;
     std::array<Client, MAX_CLIENTS> m_clients {};

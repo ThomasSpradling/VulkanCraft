@@ -478,7 +478,7 @@ void GameClient::InitClientSocket() {
         auto data = std::get<PacketJoinResult>(recv_packet.packet_data);
         if (data.is_accepted) {
             std::cout << "Successfully connected to server at "
-                << GetHostName(address_info->ai_family, from_addr)
+                // << GetHostName(address_info->ai_family, from_addr)
                 << " on port "
                 << PROTOCOL_PORT
                 << ".\n";

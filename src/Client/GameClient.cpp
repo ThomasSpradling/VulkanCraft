@@ -1,5 +1,6 @@
 #include "../Graphics/utils.h"
 #include <array>
+#include <ctime>
 #include <glm/gtc/quaternion.hpp>
 #include <optional>
 #include <string>
@@ -15,18 +16,22 @@
 #include "../Graphics/DescriptorLayoutBuilder.h"
 #include "../Graphics/DescriptorWriter.h"
 
-#include "../Network/Packets.h"
+#include "../Network/Packet.h"
+#include "../Network/Protocol.h"
+#include "../Network/Packets/SystemPackets.h"
 
 #include "../Graphics/PipelineBuilder.h"
 #include <vulkan/vulkan_core.h>
 #include "GameClient.h"
-#include "../Network/Address.h"
 #include <iostream>
 #include <vector>
 
 void GameClient::Initialize() {
     std::cout << "Game initialized!" << std::endl;
     m_frame_data.resize(m_renderer->SwapChainImageCount());
+
+    // TODO: Remove
+    srand(time(nullptr));
 
     // Graphics
 
@@ -38,27 +43,13 @@ void GameClient::Initialize() {
     InitTextures();
     InitGeometry();
 
-    // m_player = std::make_unique<Player>();
+    std::cout << "Loaded stuff\n";
 
-    // Networks
     InitClientSocket();
 }
 
 void GameClient::ShutDown() {
-    // Disconnect from server
-    NetworkBuffer buffer;
-    Packet packet {
-        .packet_type = PacketType::ClientLeave,
-        .packet_data = PacketClientLeave{
-            .player_id = m_player_id,
-        }
-    };
-    packet.Write(buffer);
-
-    int bytes_sent = sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
-    if (bytes_sent == SOCKET_ERROR) {
-        std::cerr << "Error sendto\n";
-    }
+    m_client->Disconnect(m_server);
 
     std::cout << "Game shutting down!" << std::endl;
 
@@ -70,18 +61,14 @@ void GameClient::ShutDown() {
 
 void GameClient::Update(float delta_time) {
     //// Receive packets from server ////
-    ReceiveNetworkPackets();
     
     m_network_send_timer += delta_time;
     if (m_network_send_timer >= 1000.0f / NETWORK_INPUT_SEND_RATE) {
         m_network_send_timer = 0.0;
-        SendNetworkPackets();
-    }
 
-    m_heartbeat_timer += delta_time;
-    if (m_heartbeat_timer >= 1000.0f / HEART_RATE) {
-        m_heartbeat_timer = 0.0;
-        SendHeartbeatPacket();
+        SendNetworkPackets();
+        m_client->Update(1000.0f / NETWORK_INPUT_SEND_RATE);
+        ReceiveNetworkPackets();
     }
 
     const auto extent = m_renderer->DrawExtent();
@@ -424,236 +411,55 @@ void GameClient::UpdateUniforms() {
 }
 
 void GameClient::InitClientSocket() {
-    //// Setup ////
-
-    const std::string server_address = "127.0.0.1";
-
-    WSADATA winsock_data;
-    if (WSAStartup(MAKEWORD(2, 2), &winsock_data) != 0) {
-        std::cerr << "WSA starup failed!";
-    }
-
-    addrinfo hints = {
-        .ai_family = AF_INET,
-        .ai_socktype = SOCK_DGRAM,
-    };
-
-    addrinfo *address_info;
-    if (getaddrinfo(server_address.data(), std::to_string(PROTOCOL_PORT).data(), &hints, &address_info) != 0) {
-        std::cerr << "failed to create addrinfo\n";
-    }
-
-    m_socket = socket(address_info->ai_family, address_info->ai_socktype, address_info->ai_protocol);
-    if (m_socket == INVALID_SOCKET) {
-        std::cerr << "Invalid socket!\n";
-    }
-
-    //// Client ////
-    NetworkBuffer buffer;
-    Packet send_packet {
-        .packet_type = PacketType::ClientJoin,
-    };
-    send_packet.Write(buffer);
+    m_socket_api = std::make_unique<SocketAPI>();
+    m_socket_api->Initialize();
     
-    int bytes_sent = sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, address_info->ai_addr, address_info->ai_addrlen);
-    if (bytes_sent == SOCKET_ERROR) {
-        std::cerr << "Failed to send from client!\n";
-    }
-    buffer.Clear();
-    
-    // Receive an acknowledgement
-    sockaddr from_addr;
-    int from_length = sizeof(from_addr);
+    m_client = std::make_unique<NetworkHost>(HostType::Client);
+    NetworkAddress server_address {"127.0.0.1", PROTOCOL_PORT};
 
-    NetworkBuffer recv_buffer;
-    recv_buffer.Resize(512);
-    int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), recv_buffer.GetSize(), 0, &from_addr, &from_length);
-    if (bytes_received == SOCKET_ERROR)
-        std::cerr << "Error on recvfrom!\n";
-
-    Packet recv_packet;
-    recv_packet.Read(recv_buffer);
-    if (recv_packet.packet_type == PacketType::JoinResult) {
-        m_connected_server = true;
-        auto data = std::get<PacketJoinResult>(recv_packet.packet_data);
-        if (data.is_accepted) {
-            std::cout << "Successfully connected to server at "
-                // << GetHostName(address_info->ai_family, from_addr)
-                << " on port "
-                << PROTOCOL_PORT
-                << ".\n";
-
-            m_connected_server = true;
-            m_player_id = data.player_id;
-        } else {
-            std::cerr << "Could not connect to server!\n";
-        }
+    if (auto peer = m_client->Connect(server_address)) {
+        m_server = *peer;
+        return;
     }
 
-    
-
-    u_long non_blocking = 1;
-    if (ioctlsocket(m_socket, FIONBIO, &non_blocking) == SOCKET_ERROR) {
-        std::cerr << "Failed to set client socket non-blocking: " << WSAGetLastError() << "\n";
-    }
-
-    m_server_addrinfo = *address_info;
+    std::cerr << "Could not connect to server address!\n";
 }
 
 void GameClient::DestroyClientSocket() {
-    
+    // m_client->Disconnect(m_server);
 }
 
 void GameClient::ReceiveNetworkPackets() {
-    NetworkBuffer recv_buffer{};
-    while (true) {
-        recv_buffer.Resize(512);
-
-        sockaddr from_addr{};
-        int from_length = sizeof(from_addr);
+    NetworkCommand command;
+    while (m_client->PollNetworkCommand(command)) {
+        if (command.type != NetworkCommandType::ReceivePacket)
+            continue;
         
-        int bytes_received = recvfrom(m_socket, recv_buffer.GetData(), recv_buffer.GetSize(), 0, &from_addr, &from_length);
-        if (bytes_received == SOCKET_ERROR) {
-            int error = WSAGetLastError();
-            if (error == WSAEWOULDBLOCK)
-                break;
-            std::cerr << "Client recvfrom failed!\n";
-        }
-
-        Packet packet{};
-        PacketError err = packet.Read(recv_buffer);
-        if (err == PacketError::ChecksumError) {
-            std::cerr << "Packet dropped due to mismatching checksum.\n";
-            continue;
-        }
-
-        if (err == PacketError::ChecksumError) {
-            std::cerr << "Packet dropped due to serialization error.\n";
-            continue;
-        }
-
-        switch (packet.packet_type) {
-            case PacketType::PlayerState: {
-                const auto &packet_data = std::get<PacketPlayerState>(packet.packet_data);
-                m_players.resize(packet_data.count);
-                for (uint32_t i = 0; i < packet_data.count; ++i) {
-                    m_players[i] = {
-                        .id = packet_data.data[i].id,
-                        .position = packet_data.data[i].position,
-                        .yaw = packet_data.data[i].yaw,
-                        .pitch = packet_data.data[i].pitch,
-                    };
-
-                    if (m_players[i].id == m_player_id) {
-                        m_current_position = m_players[i].position;
-                        m_current_yaw = m_players[i].yaw;
-                        m_current_pitch = m_players[i].pitch;
-                    }
-                }
+        Packet &packet = *command.packet;
+        switch (packet.Type()) {
+            case PacketType::Test: {
+                auto *test_packet = dynamic_cast<TestPacket *>(&packet);
+                std::cout << "Received packet from server: " << test_packet->value << "\n";
                 break;
             }
-            case PacketType::JoinResult:
             default:
                 break;
         }
-
-        recv_buffer.Clear();        
     }
 }
 
 void GameClient::SendNetworkPackets() {
-    //// PLAYER INPUTS ////
+    if (!m_client->IsConnected(m_server))
+        return;
 
-    float mouse_dx = m_input_handler->GetMouseDeltaX();
-    float mouse_dy = m_input_handler->GetMouseDeltaY();
+    static bool sent = false;
 
-    glm::vec2 look_delta = glm::vec2(0.0f);
-
-    if (mouse_dx != 0.0f) {
-        look_delta.x += mouse_dx;
-    }
-
-    if (mouse_dy != 0.0f) {
-        look_delta.y += mouse_dy;
-    }
-
-    float yaw = m_current_yaw;
-    float pitch = m_current_pitch;
-    if (look_delta != glm::vec2(0.0f)) {
-        yaw -= look_delta.x;
-        pitch -= look_delta.y;
-        pitch = glm::clamp(pitch, -89.0f, 89.0f);
-
-        Packet packet {
-            .packet_type = PacketType::ChangeView,
-            .packet_data = PacketChangeView {
-                .player_id = m_player_id,
-                .yaw = yaw,
-                .pitch = pitch,
-            }
-        };
-
-        NetworkBuffer send_buffer;
-        packet.Write(send_buffer);
-
-        int bytes = sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
-        if (bytes == SOCKET_ERROR) {
-            std::cerr << "Failed sendto: " << WSAGetLastError() << "\n";
-        }
-    }
-    
-    glm::vec3 forward = glm::vec3(
-        cos(glm::radians(yaw)),
-        0.0f,
-        -sin(glm::radians(yaw))
-    );
-
-    forward = glm::normalize(forward);
-
-    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-
-    glm::vec3 player_direction = glm::vec3(0.0f);
-
-    if (m_input_handler->IsKeyDown(GLFW_KEY_W))
-        player_direction += forward;
-    if (m_input_handler->IsKeyDown(GLFW_KEY_S))
-        player_direction -= forward;
-    if (m_input_handler->IsKeyDown(GLFW_KEY_D))
-        player_direction += right;
-    if (m_input_handler->IsKeyDown(GLFW_KEY_A))
-        player_direction -= right;
-    
-    if (player_direction != glm::vec3(0.0f)) {
-        player_direction = glm::normalize(player_direction);
-
-        Packet packet {
-            .packet_type = PacketType::MovePlayer,
-            .packet_data = PacketMovePlayer {
-                .player_id = m_player_id,
-                .direction = player_direction,
-            },
-        };
-        
-        NetworkBuffer send_buffer;
-        packet.Write(send_buffer);
-
-        int bytes = sendto(m_socket, send_buffer.GetData(), send_buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen);
-        if (bytes == SOCKET_ERROR) {
-            std::cerr << "Failed sendto: " << WSAGetLastError() << "\n";
-        }
-    }
-}
-
-void GameClient::SendHeartbeatPacket() {
-    NetworkBuffer buffer;
-    Packet packet { 
-        .packet_type = PacketType::Heartbeat,
-        .packet_data = PacketHeartbeat{
-            .player_id = m_player_id,
-        }
-    };
-    packet.Write(buffer);
-    if (sendto(m_socket, buffer.GetData(), buffer.GetSize(), 0, m_server_addrinfo.ai_addr, m_server_addrinfo.ai_addrlen) == SOCKET_ERROR) {
-        std::cerr << "Failed to send heartbeat!\n";
+    if (!sent) {
+        auto packet = std::make_unique<TestPacket>();
+        // std::vector<uint32_t> items = ;
+        // packet->items
+        packet->value = std::rand();
+        m_client->SendPacket(m_server, m_basic_channel, std::move(packet));
+        sent = true;
     }
 }

@@ -3,16 +3,21 @@
 #include <string>
 #include <string_view>
 #include "Common.h"
+#include "../../Utils/NonMovable.h"
 
 class Socket;
-class NetworkAddress {
+class NetworkAddress : public NonMovable {
     friend Socket;
 public:
     NetworkAddress() {}
-    NetworkAddress(const sockaddr *address, socklen_t size);
-    NetworkAddress(uint32_t port, AddressFamily family = AddressFamily::IPv4);
-    NetworkAddress(std::string_view address, uint32_t port, AddressFamily family = AddressFamily::IPv4);
+    explicit NetworkAddress(const sockaddr *address, socklen_t size);
+    explicit NetworkAddress(uint32_t port, AddressFamily family = AddressFamily::IPv4);
+    explicit NetworkAddress(std::string_view address, uint32_t port, AddressFamily family = AddressFamily::IPv4);
 
+    ~NetworkAddress() = default;
+    NetworkAddress(const NetworkAddress &other) = default;
+    NetworkAddress &operator=(const NetworkAddress &other) = default;
+    
     bool operator==(const NetworkAddress &other) const;
 
     static NetworkAddress Any(uint32_t port, AddressFamily family = AddressFamily::IPv4) {

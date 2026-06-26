@@ -4,15 +4,14 @@
 #include "../Events/EventListener.h"
 #include "../Graphics/gpu_structs.h"
 #include <glm/glm.hpp>
+#include <memory>
 #include <vector>
 #include "../Graphics/GLTFModel.h"
 #include "../Graphics/Renderable.h"
 #include "ChunkRenderer.h"
 
-// Sockets
-#define NOMINMAX
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include "../Platform/Sockets/SocketAPI.h"
+#include "../Network/NetworkHost.h"
 
 struct SceneData {
     glm::mat4 view;
@@ -77,7 +76,7 @@ private:
 
     double m_network_send_timer = 0.0;
     double m_heartbeat_timer = 0.0;
-    const int NETWORK_INPUT_SEND_RATE = 60; // Hz
+    const int NETWORK_INPUT_SEND_RATE = 10; // Hz
     const int HEART_RATE = 1; // Hz
 
     std::vector<Player> m_players;
@@ -86,10 +85,10 @@ private:
     float m_current_yaw = 90.0f;
     float m_current_pitch = 0.0f;
 
-    SOCKET m_socket;
-    addrinfo m_server_addrinfo;
-    bool m_connected_server = false;
-    uint32_t m_player_id;
+    std::unique_ptr<SocketAPI> m_socket_api {};
+    std::unique_ptr<NetworkHost> m_client {};
+    PeerId m_server {};
+    const ChannelId m_basic_channel = 1;
 private:
     void InitRenderTargets();
     void DestroyRenderTargets();
@@ -110,5 +109,4 @@ private:
 
     void ReceiveNetworkPackets();
     void SendNetworkPackets();
-    void SendHeartbeatPacket();
 };

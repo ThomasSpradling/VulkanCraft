@@ -4,20 +4,24 @@
 #include <vector>
 #include "../../errors.h"
 #include "../../Platform/Sockets/NetworkBuffer.h"
+#include "../Packet.h"
 
-struct PacketJoinResult {
+class JoinResultPacket : public Packet {
+public:
     bool is_accepted;
     uint32_t player_id = 0;
+public:
+    virtual void SerializeData(NetworkBuffer &buffer) const override {
+        buffer.Write(is_accepted);
+        buffer.Write(player_id);
+    }
 
-    inline void Read(NetworkBuffer &buffer) {
+    virtual void DeserializeData(NetworkBuffer &buffer) override {
         is_accepted = buffer.ReadBoolean();
         player_id = buffer.ReadInteger();
     }
 
-    inline void Write(NetworkBuffer &buffer) const {
-        buffer.Write(is_accepted);
-        buffer.Write(player_id);
-    }
+    virtual PacketType Type() const override { return PacketType::Test; }
 };
 
 /**
@@ -27,7 +31,8 @@ struct PacketJoinResult {
  * 28   ID_1  (4 bytes)     POSITION_1 (12 bytes)     DIRECTION_1 (8 bytes)
  * ...
  */
-struct PacketPlayerState {
+class PlayerStatePacket : public Packet {
+public:
     struct Data {
         uint32_t id;
         glm::vec3 position;
@@ -36,20 +41,8 @@ struct PacketPlayerState {
     
     uint32_t count;
     std::vector<Data> data;
-
-    inline void Read(NetworkBuffer &buffer) {
-        count = buffer.ReadInteger();
-        data.resize(count);
-
-        for (uint32_t i = 0; i < count; ++i) {
-            data[i].id = buffer.ReadInteger();
-            data[i].position = buffer.ReadVec3();
-            data[i].yaw = buffer.ReadFloat();
-            data[i].pitch = buffer.ReadFloat();
-        }
-    }
-
-    inline void Write(NetworkBuffer &buffer) const {
+public:
+    virtual void SerializeData(NetworkBuffer &buffer) const override {
         buffer.Write(count);
         Assert(data.size() == count, "Size mismatch in writing server packet PacketState");
 
@@ -58,6 +51,18 @@ struct PacketPlayerState {
             buffer.Write(data[i].position);
             buffer.Write(data[i].yaw);
             buffer.Write(data[i].pitch);
+        }
+    }
+
+    virtual void DeserializeData(NetworkBuffer &buffer) override {
+        count = buffer.ReadInteger();
+        data.resize(count);
+
+        for (uint32_t i = 0; i < count; ++i) {
+            data[i].id = buffer.ReadInteger();
+            data[i].position = buffer.ReadVec3();
+            data[i].yaw = buffer.ReadFloat();
+            data[i].pitch = buffer.ReadFloat();
         }
     }
 };

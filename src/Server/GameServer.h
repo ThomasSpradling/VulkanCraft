@@ -2,18 +2,18 @@
 
 #include <array>
 #include <glm/glm.hpp>
-#include "../Network/Address.h"
-
-// Sockets
-#define NOMINMAX
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include <memory>
+#include "../Platform/Sockets/SocketAPI.h"
+#include "../Network/NetworkHost.h"
 
 #include "../Utils/NonCopyable.h"
 #include "../Utils/NonMovable.h"
 
 class GameServer : public NonCopyable, public NonMovable {
 public:
+    GameServer();
+    ~GameServer() = default;
+
     void Initialize();
     void Run();
     void Update(float delta_time);
@@ -45,14 +45,15 @@ private:
     const int CLIENT_TIMEOUT = 5000; // ms
 
     double m_network_send_timer = 0.0;
-    const int NETWORK_SNAPSHOT_RATE = 30; // Hz
-
-    SOCKET m_socket {};
+    const int NETWORK_SNAPSHOT_RATE = 10; // Hz
 
     static const int MAX_CLIENTS = 32;
     std::array<Client, MAX_CLIENTS> m_clients {};
 
-    addrinfo *m_address_info = nullptr;
+    std::unique_ptr<SocketAPI> m_socket_api {};
+    std::unique_ptr<NetworkHost> m_server {};
+
+    const ChannelId m_basic_channel = 1;
 private:
     void Tick(float delta_time);
     void ReceiveNetworkPackets();

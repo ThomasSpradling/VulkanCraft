@@ -98,6 +98,7 @@ void ChunkRenderer::Init(VkDescriptorSetLayout global_layout) {
             LoadChunkMesh(chunk, glm::ivec2(x, z));
         }
     }
+    std::cout << "Loaded chunks!\n";
 }
 
 void ChunkRenderer::Destroy() { 

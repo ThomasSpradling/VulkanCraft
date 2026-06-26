@@ -81,61 +81,25 @@ add_subdirectory(third_party/VulkanMemoryAllocator SYSTEM)
 
 file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
 add_executable(${PROJECT_NAME} ${CORE_SOURCES})
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    add_compile_options(
-        "$<$<CONFIG:Debug>:/Od>"      # disable optimization
-        "$<$<CONFIG:Debug>:/Ob0>"     # disable inline expansion
-        "$<$<CONFIG:Debug>:/Oy->"     # keep frame pointers
-        "$<$<CONFIG:Debug>:/Z7>"
-    )
 
-    add_link_options(
-        "$<$<CONFIG:Debug>:/DEBUG:FULL>"
-        "$<$<CONFIG:Debug>:/INCREMENTAL>"
-        "$<$<CONFIG:Debug>:/OPT:NOREF>"
-        "$<$<CONFIG:Debug>:/OPT:NOICF>"
-    )
+target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<CONFIG:Debug>:
+        /Od
+        /Ob0
+        /Zi
+        /Oy-
+    >
+    $<$<CONFIG:RelWithDebInfo>:
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-O2 -gline-tables-only -fdebug-types-section>
+        $<$<CXX_COMPILER_ID:MSVC>:/O2 /Zi /Oy->
+    >
+)
 
-elseif(MSVC)
-    add_compile_options(
-        "$<$<CONFIG:Debug>:/Od>"
-        "$<$<CONFIG:Debug>:/Ob0>"
-        "$<$<CONFIG:Debug>:/Oy->"
-        "$<$<CONFIG:Debug>:/Zi>"
-        "$<$<CONFIG:Debug>:/RTC1>"
-    )
-
-    add_link_options(
-        "$<$<CONFIG:Debug>:/DEBUG:FULL>"
-        "$<$<CONFIG:Debug>:/INCREMENTAL>"
-        "$<$<CONFIG:Debug>:/OPT:NOREF>"
-        "$<$<CONFIG:Debug>:/OPT:NOICF>"
-    )
-
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    add_compile_options(
-        "$<$<CONFIG:Debug>:-O0>"
-        "$<$<CONFIG:Debug>:-g3>"
-        "$<$<CONFIG:Debug>:-fno-omit-frame-pointer>"
-        "$<$<CONFIG:Debug>:-fno-inline>"
-    )
-endif()
-# target_compile_options(${PROJECT_NAME} PRIVATE
-#     $<$<CONFIG:Debug>:
-#         $<$<CXX_COMPILER_ID:GNU,Clang>:-g>
-#         $<$<CXX_COMPILER_ID:MSVC>: /Zi>
-#     >
-#     $<$<CONFIG:RelWithDebInfo>:
-#         $<$<CXX_COMPILER_ID:GNU,Clang>:-O2 -gline-tables-only -fdebug-types-section>
-#         $<$<CXX_COMPILER_ID:MSVC>:/O2 /Zi /Oy->
-#     >
-# )
-
-# target_link_options(${PROJECT_NAME} PRIVATE
-#     $<$<CONFIG:RelWithDebInfo>:
-#         $<$<CXX_COMPILER_ID:MSVC>:/DEBUG /OPT:REF /OPT:ICF>
-#     >
-# )
+target_link_options(${PROJECT_NAME} PRIVATE
+    $<$<CONFIG:RelWithDebInfo>:
+        $<$<CXX_COMPILER_ID:MSVC>:/DEBUG /OPT:REF /OPT:ICF>
+    >
+)
 
 target_link_libraries(${PROJECT_NAME}
     glfw

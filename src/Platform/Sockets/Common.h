@@ -8,6 +8,8 @@
     #include <ws2tcpip.h>
 #else
     #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <fcntl.h>
 #endif
 
 #include "../Errors.h"

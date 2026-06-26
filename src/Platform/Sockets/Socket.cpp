@@ -1,6 +1,7 @@
 #include "Socket.h"
 #include <algorithm>
 #include <cstring>
+#include <format>
 #include <stdexcept>
 #include <utility>
 #include "../../errors.h"
@@ -8,6 +9,9 @@
 Socket::Socket(AddressFamily address_family) {
     m_family = static_cast<int>(address_family);
     m_handle = socket(m_family, SOCK_DGRAM, IPPROTO_UDP);
+
+    if (m_handle == INVALID_SOCKET)
+        SocketError("Failed to create socket.");
 }
 
 Socket::~Socket() {
@@ -16,7 +20,7 @@ Socket::~Socket() {
 
 void Socket::Bind(const NetworkAddress &socket_address) {
     if (bind(m_handle, socket_address.Data(), socket_address.m_size) == SOCKET_ERROR) {
-        throw std::runtime_error("Error binding socket: " + WindowsErrorString(WSAGetLastError()));
+        SocketError("Error binding socket.");
     }
 }
 
@@ -42,23 +46,23 @@ void Socket::Close() {
 #endif
 }
 
-uint32_t Socket::SendTo(const NetworkBuffer &data, const NetworkAddress &to) {
-    uint32_t data_size = std::min<uint32_t>(data.GetSize(), MAX_NETWORK_TRANSMISSION);
-    if (data_size == 0)
+uint32_t Socket::SendTo(const NetworkAddress &to, const NetworkBuffer &data) {
+    Assert(data.GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Cannot send more data than MTU!");
+    if (data.GetSize() == 0)
         return 0;
 
-    int data_sent = sendto(m_handle, data.GetData(), data_size, 0, to.Data(), to.m_size);
-    if (data_sent == SOCKET_ERROR) {
-        throw std::runtime_error("Error sending from socket: " + WindowsErrorString(WSAGetLastError()));
-    }
+    int data_sent = sendto(m_handle, data.GetData(), data.GetSize(), 0, to.Data(), to.m_size);
+    if (data_sent == SOCKET_ERROR)
+        SocketError("Error sending from socket.");
+
     return data_sent;
 }
 
-SocketError Socket::ReceiveFrom(NetworkBuffer &buffer, NetworkAddress &from) {
+SocketError Socket::ReceiveFrom(NetworkAddress &from, NetworkBuffer &buffer) {
     sockaddr_storage addr {};
     socklen_t size = sizeof(addr);
     
-    buffer.Resize(MAX_NETWORK_TRANSMISSION);
+    buffer.Resize(MAX_NETWORK_TRANSMISSION_SIZE);
     int data_received = recvfrom(m_handle, buffer.GetData(), buffer.GetSize(), 0, reinterpret_cast<sockaddr*>(&addr), &size);
     if (data_received == SOCKET_ERROR) {
 #ifdef PLATFORM_WINDOWS
@@ -77,7 +81,7 @@ SocketError Socket::ReceiveFrom(NetworkBuffer &buffer, NetworkAddress &from) {
             return SocketError::WouldBlock;
 #endif
 
-        throw std::runtime_error("Error receiving to socket: " + WindowsErrorString(WSAGetLastError()));
+        SocketError("Error receiving to socket.");
     }
 
     NetworkAddress recv_address{reinterpret_cast<const sockaddr*>(&addr), size};
@@ -88,8 +92,24 @@ SocketError Socket::ReceiveFrom(NetworkBuffer &buffer, NetworkAddress &from) {
 }
 
 void Socket::MakeNonBlocking(bool value) {
-    u_long non_blocking = static_cast<u_long>(value);
+#ifdef PLATFORM_WINDOWS
+    DWORD non_blocking = static_cast<DWORD>(value);
     if (ioctlsocket(m_handle, FIONBIO, &non_blocking) == SOCKET_ERROR) {
-        throw std::runtime_error("Error changing I/O Socket Control Non-Blocking Mode: " + WindowsErrorString(WSAGetLastError()));
+        SocketError("Error changing I/O Socket Control Non-Blocking Mode.");
     }
+#else
+    int non_blocking = 1;
+    if (fcntl(m_handle, F_SETFL, O_NONBLOCK, non_blocking) == -1) {
+        SocketError("Error changing I/O Socket Control Non-Blocking Mode.")
+    }
+#endif
+}
+
+void Socket::SocketError(const std::string &description) {
+#ifdef PLATFORM_WINDOWS
+    int err = WSAGetLastError();
+    throw std::runtime_error(std::format("{} Error [{}]: {}.", description, err, WindowsErrorString(err)));
+#else
+    throw std::runtime_error(description);
+#endif
 }

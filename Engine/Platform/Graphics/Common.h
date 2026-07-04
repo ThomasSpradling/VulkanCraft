@@ -1,0 +1,100 @@
+#pragma once
+
+#include <volk.h>
+#include <vulkan/vk_enum_string_helper.h>
+#include <vulkan/vulkan_core.h>
+#include <vk_mem_alloc.h>
+
+#include "Core/errors.h"
+
+#define VK_CHECK(expr)                                                                                              \
+    if ((expr) != VK_SUCCESS) {                                                                                     \
+        std::string str = "Call '" + std::string(#expr) + "' returned " + std::string(string_VkResult(expr)) + "."; \
+        throw std::runtime_error(str);                                                                              \
+    }
+
+
+// ======================== //
+// ---- Vulkan Objects ---- //
+// ======================== //
+
+template<typename T>
+constexpr VkObjectType ObjectType() {
+    return VK_OBJECT_TYPE_UNKNOWN;
+}
+
+#define VULKAN_OBJECT_TYPE(vk_type, object_type)          \
+    template<>                                            \
+    constexpr VkObjectType ObjectType<vk_type>() {        \
+        return object_type;                               \
+    }
+
+    VULKAN_OBJECT_TYPE(VkInstance,               VK_OBJECT_TYPE_INSTANCE)
+    VULKAN_OBJECT_TYPE(VkPhysicalDevice,         VK_OBJECT_TYPE_PHYSICAL_DEVICE)
+    VULKAN_OBJECT_TYPE(VkDevice,                 VK_OBJECT_TYPE_DEVICE)
+    VULKAN_OBJECT_TYPE(VkQueue,                  VK_OBJECT_TYPE_QUEUE)
+    VULKAN_OBJECT_TYPE(VkSemaphore,              VK_OBJECT_TYPE_SEMAPHORE)
+    VULKAN_OBJECT_TYPE(VkCommandBuffer,          VK_OBJECT_TYPE_COMMAND_BUFFER)
+    VULKAN_OBJECT_TYPE(VkFence,                  VK_OBJECT_TYPE_FENCE)
+    VULKAN_OBJECT_TYPE(VkDeviceMemory,           VK_OBJECT_TYPE_DEVICE_MEMORY)
+    VULKAN_OBJECT_TYPE(VkBuffer,                 VK_OBJECT_TYPE_BUFFER)
+    VULKAN_OBJECT_TYPE(VkImage,                  VK_OBJECT_TYPE_IMAGE)
+    VULKAN_OBJECT_TYPE(VkEvent,                  VK_OBJECT_TYPE_EVENT)
+    VULKAN_OBJECT_TYPE(VkQueryPool,              VK_OBJECT_TYPE_QUERY_POOL)
+    VULKAN_OBJECT_TYPE(VkBufferView,             VK_OBJECT_TYPE_BUFFER_VIEW)
+    VULKAN_OBJECT_TYPE(VkImageView,              VK_OBJECT_TYPE_IMAGE_VIEW)
+    VULKAN_OBJECT_TYPE(VkShaderModule,           VK_OBJECT_TYPE_SHADER_MODULE)
+    VULKAN_OBJECT_TYPE(VkPipelineCache,          VK_OBJECT_TYPE_PIPELINE_CACHE)
+    VULKAN_OBJECT_TYPE(VkPipelineLayout,         VK_OBJECT_TYPE_PIPELINE_LAYOUT)
+    VULKAN_OBJECT_TYPE(VkRenderPass,             VK_OBJECT_TYPE_RENDER_PASS)
+    VULKAN_OBJECT_TYPE(VkPipeline,               VK_OBJECT_TYPE_PIPELINE)
+    VULKAN_OBJECT_TYPE(VkDescriptorSetLayout,    VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT)
+    VULKAN_OBJECT_TYPE(VkSampler,                VK_OBJECT_TYPE_SAMPLER)
+    VULKAN_OBJECT_TYPE(VkDescriptorPool,         VK_OBJECT_TYPE_DESCRIPTOR_POOL)
+    VULKAN_OBJECT_TYPE(VkDescriptorSet,          VK_OBJECT_TYPE_DESCRIPTOR_SET)
+    VULKAN_OBJECT_TYPE(VkFramebuffer,            VK_OBJECT_TYPE_FRAMEBUFFER)
+    VULKAN_OBJECT_TYPE(VkCommandPool,            VK_OBJECT_TYPE_COMMAND_POOL)
+    VULKAN_OBJECT_TYPE(VkDescriptorUpdateTemplate, VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE)
+    VULKAN_OBJECT_TYPE(VkSurfaceKHR,             VK_OBJECT_TYPE_SURFACE_KHR)
+    VULKAN_OBJECT_TYPE(VkSwapchainKHR,           VK_OBJECT_TYPE_SWAPCHAIN_KHR)
+    VULKAN_OBJECT_TYPE(VkDebugUtilsMessengerEXT, VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT)
+    VULKAN_OBJECT_TYPE(VkAccelerationStructureKHR, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR)
+    VULKAN_OBJECT_TYPE(VkPipelineBinaryKHR,      VK_OBJECT_TYPE_PIPELINE_BINARY_KHR)
+
+#undef VULKAN_OBJECT_TYPE
+
+// ========================== //
+// ---- Vulkan Utilities ---- //
+// ========================== //
+
+enum class MemoryAccessType : uint8_t {
+    None    = 0,
+    Read    = 1 << 0,
+    Write   = 1 << 1,
+    ReadWrite = Read | Write,
+};
+
+bool IsDepthOnlyFormat(VkFormat format);
+bool IsDepthStencilFormat(VkFormat format);
+bool IsDepthFormat(VkFormat format);
+VkDeviceSize GetBytesPerPixel(VkFormat format);
+
+/**
+ * @return All aspects that make up this image format.
+ */
+VkImageAspectFlags GetFormatAspect(VkFormat format);
+
+/**
+ * @return Gets the access flags defining when an image of this layer would be accessed for synchronization
+ * purposes. `read` and `write` can be used to fine-tune which type(s) of access we expect.
+ *
+ * @note Should avoid using with VK_IMAGE_LAYOUT_GENERAL as this may be accessed via many ways.
+ */
+VkAccessFlags2 GetAccessFlags(VkImageLayout image_layout, MemoryAccessType access = MemoryAccessType::ReadWrite);
+
+/**
+ * @return Gets the pipeline stages that an image of this layout is most likely to be processed during.
+ * 
+ * @note Should avoid using with VK_IMAGE_LAYOUT_GENERAL as this could have been used along any pipeline.
+ */
+VkPipelineStageFlags2 GetPipelineStageFlags(VkImageLayout image_layout);

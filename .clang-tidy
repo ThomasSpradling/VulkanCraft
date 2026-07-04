@@ -1,0 +1,20 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-*,
+  -bugprone-branch-clone,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-use-nodiscard,
+  -modernize-return-braced-init-list,
+  -bugprone-easily-swappable-parameters,
+  -portability-avoid-pragma-once,
+  -bugprone-exception-escape,
+  -modernize-use-integer-sign-comparison
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: '^(.*Engine/.*|.*Games/.*)$'

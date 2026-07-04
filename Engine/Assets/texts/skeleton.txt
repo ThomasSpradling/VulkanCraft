@@ -1,0 +1,381 @@
+#pragma once
+
+#include "Socket.h"
+#include "NetworkBuffer.h"
+
+#include <cstdint>
+#include <deque>
+#include <unordered_map>
+#include <vector>
+
+enum class DeliveryMode : uint8_t {
+    // Fire-and-forget. If it is lost, it is lost.
+    // Good for frequent state updates like position, rotation, velocity, etc.
+    Unreliable,
+
+    // Message must eventually arrive, but does not need to arrive in order
+    // relative to other reliable messages.
+    // Good for spawn/despawn events, inventory changes, chat, etc.
+    ReliableUnordered,
+
+    // Message must arrive, and messages on this same channel should be delivered
+    // to the game layer in the same order they were sent.
+    // Use sparingly because one lost message can block newer messages.
+    ReliableOrdered,
+};
+
+using NetworkChannel = uint8_t;
+
+struct ReceivedMessage {
+    SocketAddress from;
+    NetworkBuffer data;
+    NetworkChannel channel = 0;
+    DeliveryMode delivery = DeliveryMode::Unreliable;
+};
+
+struct TransportConfig {
+    // Maximum UDP datagram size your socket layer allows.
+    // Actual payload per fragment will be smaller because transport headers need space.
+    uint32_t max_packet_size = MAX_SOCKET_PACKET_SIZE;
+
+    // Maximum amount of original user data allowed in one logical message.
+    // Prevents someone from trying to send/reassemble absurdly large buffers.
+    uint32_t max_message_size = 64 * 1024;
+
+    // How long to keep incomplete unreliable fragmented messages before dropping them.
+    double unreliable_fragment_timeout_seconds = 1.0;
+
+    // How long before resending reliable fragments/messages that have not been ACKed.
+    double reliable_resend_seconds = 0.1;
+
+    // Maximum outgoing datagrams to send per Update().
+    // Helps avoid flooding the network in one frame.
+    uint32_t max_sends_per_update = 256;
+
+    // Maximum incoming datagrams to process per Update().
+    // Prevents networking from eating the whole frame.
+    uint32_t max_receives_per_update = 256;
+};
+
+class MessageTransport {
+public:
+    MessageTransport(Socket socket, TransportConfig config = {});
+
+    // Advances the transport layer by one game/network tick.
+    //
+    // This should never block. It should:
+    // - drain currently available UDP datagrams from the socket
+    // - parse transport headers
+    // - process ACKs
+    // - process received fragments
+    // - complete reassembled messages
+    // - queue ACKs to send back
+    // - resend reliable data whose timeout has expired
+    // - send as many queued outgoing datagrams as allowed by budget
+    //
+    // The game should call this once per frame or fixed network tick.
+    void Update(double now_seconds);
+
+    // Queues a logical message to be sent to a remote address.
+    //
+    // The buffer is opaque to this layer. It does not know or care whether the
+    // bytes represent movement, chat, chunks, entities, etc.
+    //
+    // If the buffer is small enough, it becomes one UDP datagram.
+    // If the buffer is too large, it is fragmented into multiple datagrams.
+    //
+    // DeliveryMode controls whether the message is fire-and-forget, reliable,
+    // or reliable plus ordered within the given channel.
+    //
+    // This function should not immediately block or wait for network availability.
+    // It only queues work for Update() to flush.
+    void SendMessage(
+        const SocketAddress& to,
+        const NetworkBuffer& data,
+        DeliveryMode delivery,
+        NetworkChannel channel = 0
+    );
+
+    // Returns true if a fully completed logical message is ready.
+    //
+    // This only returns complete user messages, never partial fragments.
+    // The returned NetworkBuffer should be exactly the original payload that was
+    // passed to SendMessage() on the other side.
+    //
+    // This never waits. If no complete message is available, it returns false.
+    bool TryReceiveMessage(ReceivedMessage& out_message);
+
+    // Clears all queued incoming completed messages.
+    //
+    // Useful when disconnecting, changing scenes, or resetting network state.
+    void ClearReceivedMessages();
+
+    // Clears queued outgoing data and reliable resend state for one remote address.
+    //
+    // Useful when a peer disconnects or times out.
+    void ForgetPeer(const SocketAddress& address);
+
+    // Clears all peer state, outgoing queues, incoming partial fragments,
+    // ACK tracking, resend queues, and completed messages.
+    void Reset();
+
+private:
+    struct TransportHeader {
+        // Identifies this as your transport protocol.
+        // Helps reject random UDP traffic.
+        uint32_t magic = 0;
+
+        // Allows you to change the header format later.
+        uint8_t version = 0;
+
+        // Delivery behavior for this datagram's logical message.
+        DeliveryMode delivery = DeliveryMode::Unreliable;
+
+        // Independent stream/category for ordered delivery and prioritization.
+        NetworkChannel channel = 0;
+
+        // Unique ID for this datagram or fragment.
+        // Used by ACK logic and duplicate detection.
+        uint32_t packet_sequence = 0;
+
+        // Unique ID for the original logical message.
+        // All fragments of the same large message share this.
+        uint32_t message_id = 0;
+
+        // Fragment index within the message.
+        // For unfragmented messages, this is 0.
+        uint16_t fragment_index = 0;
+
+        // Total fragment count for this message.
+        // For unfragmented messages, this is 1.
+        uint16_t fragment_count = 1;
+
+        // Number of user payload bytes in this datagram after the header.
+        uint16_t payload_size = 0;
+
+        // Most recent remote packet sequence this side has received.
+        // Used for ACKing.
+        uint32_t ack_sequence = 0;
+
+        // Bitfield acknowledging previous packet sequences.
+        // Common game-net style: ACK latest sequence plus prior N packets.
+        uint32_t ack_bits = 0;
+    };
+
+    struct OutgoingFragment {
+        SocketAddress to;
+
+        // Full datagram payload, including transport header and fragment bytes.
+        NetworkBuffer datagram;
+
+        // Whether this datagram must be kept until ACKed.
+        bool reliable = false;
+
+        // Sequence used for ACK tracking.
+        uint32_t packet_sequence = 0;
+
+        // Last time this datagram was sent.
+        double last_send_time = 0.0;
+
+        // Number of times this fragment has been sent.
+        uint32_t send_count = 0;
+    };
+
+    struct PartialMessage {
+        SocketAddress from;
+
+        DeliveryMode delivery = DeliveryMode::Unreliable;
+        NetworkChannel channel = 0;
+
+        uint32_t message_id = 0;
+        uint16_t fragment_count = 0;
+
+        // Stores received fragment payloads until all are present.
+        std::vector<NetworkBuffer> fragments;
+
+        // Tracks which fragments have arrived.
+        std::vector<bool> received_fragments;
+
+        // Used to discard incomplete unreliable messages.
+        double first_seen_time = 0.0;
+
+        // Once all fragments are present, they are joined into one NetworkBuffer
+        // and pushed to the completed receive queue.
+        bool IsComplete() const;
+    };
+
+    struct PeerState {
+        SocketAddress address;
+
+        // Local sequence number for datagrams sent to this peer.
+        uint32_t next_packet_sequence = 1;
+
+        // Local message ID for logical messages sent to this peer.
+        uint32_t next_message_id = 1;
+
+        // Highest packet sequence received from this peer.
+        uint32_t latest_received_sequence = 0;
+
+        // Bitfield of recently received packet sequences.
+        // Used to build ACK headers.
+        uint32_t received_sequence_bits = 0;
+
+        // Reliable datagrams sent to this peer but not yet ACKed.
+        std::vector<OutgoingFragment> reliable_in_flight;
+
+        // Outgoing datagrams waiting to be sent.
+        std::deque<OutgoingFragment> send_queue;
+
+        // Fragmented messages currently being reassembled from this peer.
+        std::unordered_map<uint32_t, PartialMessage> partial_messages;
+
+        // For ReliableOrdered delivery, tracks the next expected message per channel.
+        std::unordered_map<NetworkChannel, uint32_t> next_ordered_message_to_deliver;
+
+        // Reliable ordered messages that arrived early and are waiting for older ones.
+        std::unordered_map<NetworkChannel, std::deque<ReceivedMessage>> ordered_pending;
+    };
+
+private:
+    // Reads every currently available UDP datagram up to the receive budget.
+    //
+    // This uses the underlying non-blocking socket.
+    // If no datagram is available, it simply stops.
+    void PumpSocketReceives(double now_seconds);
+
+    // Processes one raw UDP datagram from the socket.
+    //
+    // This should:
+    // - validate the transport header
+    // - find or create peer state
+    // - update ACK tracking
+    // - remove ACKed reliable outgoing datagrams
+    // - pass payload data into the fragment/message receiving path
+    void HandleIncomingDatagram(
+        const SocketAddress& from,
+        const NetworkBuffer& datagram,
+        double now_seconds
+    );
+
+    // Splits one logical NetworkBuffer message into one or more datagrams.
+    //
+    // This accounts for transport header size.
+    // For example, with MAX_SOCKET_PACKET_SIZE = 512, the actual user payload
+    // per fragment might be something like 480 bytes.
+    void QueueMessageFragments(
+        PeerState& peer,
+        const NetworkBuffer& data,
+        DeliveryMode delivery,
+        NetworkChannel channel
+    );
+
+    // Handles one fragment of a logical message.
+    //
+    // If the message has only one fragment, it can become a completed message
+    // immediately.
+    //
+    // If it has multiple fragments, this stores the fragment until all fragments
+    // arrive. Once complete, it reassembles them into the original NetworkBuffer.
+    void HandleMessageFragment(
+        PeerState& peer,
+        const TransportHeader& header,
+        const NetworkBuffer& payload,
+        double now_seconds
+    );
+
+    // Delivers a fully reassembled message to the game-facing receive queue.
+    //
+    // For unordered messages, this pushes immediately.
+    // For reliable ordered messages, this may hold the message until older
+    // messages on the same channel have been delivered.
+    void QueueCompletedMessage(
+        PeerState& peer,
+        ReceivedMessage message,
+        uint32_t message_id
+    );
+
+    // Processes ACK information received from a peer.
+    //
+    // Removes reliable outgoing datagrams from the resend list once the remote
+    // side confirms they arrived.
+    void ProcessAcks(
+        PeerState& peer,
+        uint32_t ack_sequence,
+        uint32_t ack_bits
+    );
+
+    // Updates local record of which datagrams arrived from a peer.
+    //
+    // This is used to generate ACK info for future outgoing datagrams.
+    void MarkPacketReceived(
+        PeerState& peer,
+        uint32_t packet_sequence
+    );
+
+    // Resends reliable datagrams that have not been ACKed after the resend timeout.
+    //
+    // This does not wait. It only requeues expired reliable datagrams so that
+    // FlushOutgoingDatagrams() can attempt to send them within this frame's budget.
+    void QueueReliableResends(double now_seconds);
+
+    // Sends queued datagrams through the non-blocking UDP socket.
+    //
+    // This respects max_sends_per_update.
+    // If the socket cannot send right now, the datagram remains queued for a
+    // later Update().
+    void FlushOutgoingDatagrams(double now_seconds);
+
+    // Removes incomplete fragmented messages that are too old.
+    //
+    // Especially important for unreliable fragmented messages, because missing
+    // fragments may never arrive and should not leak memory forever.
+    void DropExpiredPartialMessages(double now_seconds);
+
+    // Builds a transport header for an outgoing datagram.
+    //
+    // This fills in sequence numbers, delivery mode, message ID, fragment index,
+    // fragment count, payload size, and current ACK information for the peer.
+    TransportHeader MakeHeader(
+        PeerState& peer,
+        DeliveryMode delivery,
+        NetworkChannel channel,
+        uint32_t message_id,
+        uint16_t fragment_index,
+        uint16_t fragment_count,
+        uint16_t payload_size
+    );
+
+    // Serializes the transport header plus fragment payload into one datagram.
+    //
+    // The result must never exceed MAX_SOCKET_PACKET_SIZE.
+    NetworkBuffer BuildDatagram(
+        const TransportHeader& header,
+        const NetworkBuffer& fragment_payload
+    );
+
+    // Parses a raw datagram into a transport header and payload.
+    //
+    // Returns false for malformed, wrong-version, wrong-magic, or undersized data.
+    bool TryParseDatagram(
+        const NetworkBuffer& datagram,
+        TransportHeader& out_header,
+        NetworkBuffer& out_payload
+    );
+
+    // Gets existing peer state for an address or creates it if this is the first
+    // datagram/message involving that address.
+    PeerState& GetOrCreatePeer(const SocketAddress& address);
+
+private:
+    Socket m_socket;
+    TransportConfig m_config;
+
+    // Completed logical messages waiting for the game layer.
+    std::deque<ReceivedMessage> m_completed_messages;
+
+    // Per-remote-address transport state.
+    //
+    // In real code you need a stable key for SocketAddress, such as address string
+    // plus port, or a custom hash over sockaddr_storage.
+    std::unordered_map</* AddressKey */ uint64_t, PeerState> m_peers;
+};

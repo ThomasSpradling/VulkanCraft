@@ -1,113 +1,104 @@
 cmake_minimum_required(VERSION 3.25)
+
 project(vulkan_craft LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Dev
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Assets Paths
-add_compile_definitions(ASSET_PATH="${CMAKE_SOURCE_DIR}/Assets")
+add_library(engine_options INTERFACE)
+target_compile_features(engine_options INTERFACE cxx_std_23)
 
+# -- WARNINGS AND ERRORS -- #
 
-# Dependencies
+option(ENGINE_WARNINGS_AS_ERRORS "Enable Warnings as Errors" ON)
+option(ENGINE_STRICT_WARNINGS "Enable Strict Warnings" ON)
 
-## Vulkan
-find_package(Vulkan REQUIRED)
+if(MSVC)
+    if(ENGINE_STRICT_WARNINGS)
+        set(WARNINGS /W4)
+    else()
+        set(WARNINGS /W3)
+    endif()
 
-## GLFW
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/glfw SYSTEM)
+    if(ENGINE_WARNINGS_AS_ERRORS)
+        list(APPEND WARNINGS /WX)
+    endif()
 
-## STB
-# target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND WARNINGS
+            /clang:-Wno-unused-parameter
+            /clang:-Wno-missing-designated-field-initializers
+        )
+    else()
+        list(APPEND WARNINGS
+            /wd4100
+        )
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    if(ENGINE_STRICT_WARNINGS)
+        set(WARNINGS -Wall -Wextra -Wpedantic)
+    else()
+        set(WARNINGS -Wall)
+    endif()
 
-## Checksum generation
-add_library(crc32 third_party/crc32/crc32.cpp)
-target_include_directories(crc32 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/crc32)
+    if(ENGINE_WARNINGS_AS_ERRORS)
+        list(APPEND WARNINGS -Werror)
+    endif()
 
-
-## tinygltf
-
-set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
-set(TINYGLTF_INSTALL_VENDOR OFF CACHE BOOL "" FORCE)
-set(TINYGLTF_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/tinygltf SYSTEM)
-
-## GLM
-set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
-set(GLM_TEST_ENABLE OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/glm SYSTEM)
-
-## Volk
-add_subdirectory(third_party/volk SYSTEM)
-if (WIN32)
-    target_compile_definitions(volk PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+    list(APPEND WARNINGS
+        -Wno-unused-parameter
+        -Wno-missing-designated-field-initializers
+    )
 endif()
 
-## ImGui
-set(IMGUI_SRCS
-    third_party/imgui/imgui.cpp
-    third_party/imgui/imgui_draw.cpp
-    third_party/imgui/imgui_widgets.cpp
-    third_party/imgui/imgui_tables.cpp
-    third_party/imgui/imgui_demo.cpp
-    third_party/imgui/backends/imgui_impl_glfw.cpp
-    third_party/imgui/backends/imgui_impl_vulkan.cpp
-)
-add_library(imgui STATIC
-    ${IMGUI_SRCS}
-)
-target_include_directories(imgui PUBLIC
-    third_party/imgui
-)
-target_compile_definitions(imgui PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
-target_link_libraries(imgui volk glfw)
+target_compile_options(engine_options INTERFACE ${WARNINGS})
 
-## Vulkan Memory Allocator
-add_subdirectory(third_party/VulkanMemoryAllocator SYSTEM)
+# -- THIRD PARTY -- #
 
-# Source
+add_subdirectory(third_party SYSTEM)
 
-file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
-add_executable(${PROJECT_NAME} ${CORE_SOURCES})
+# -- CLANG TIDY -- #
 
-target_compile_options(${PROJECT_NAME} PRIVATE
-    $<$<CONFIG:Debug>:
-        /Od
-        /Ob0
-        /Zi
-        /Oy-
-    >
-    $<$<CONFIG:RelWithDebInfo>:
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-O2 -gline-tables-only -fdebug-types-section>
-        $<$<CXX_COMPILER_ID:MSVC>:/O2 /Zi /Oy->
-    >
-)
+option(ENABLE_CLANG_TIDY "Run clang-tidy." ON)
 
-target_link_options(${PROJECT_NAME} PRIVATE
-    $<$<CONFIG:RelWithDebInfo>:
-        $<$<CXX_COMPILER_ID:MSVC>:/DEBUG /OPT:REF /OPT:ICF>
-    >
-)
+if(ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
 
-target_link_libraries(${PROJECT_NAME}
-    glfw
-    glm::glm
-    volk::volk
-    VulkanMemoryAllocator
-    tinygltf
-    imgui
-    crc32 
-    ws2_32 # Windows Sockets
-)
+    if(MSVC)
+        list(APPEND CMAKE_CXX_CLANG_TIDY "--extra-arg=/EHsc")
+    else()
+        list(APPEND CMAKE_CXX_CLANG_TIDY "--extra-arg=-fexceptions" "--extra-arg=-fcxx-exceptions")
+    endif()
+endif()
+
+# -- ADDRESS SANITIZER -- #
+
+option(ENGINE_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" ON)
+
+if(ENGINE_ENABLE_ADDRESS_SANITIZER)
+    message(STATUS "AddressSanitizer enabled")
+
+    if(MSVC)
+        string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+        string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+
+        target_compile_options(engine_options INTERFACE /fsanitize=address /Zi)
+        target_link_options(engine_options INTERFACE /INCREMENTAL:NO)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+        target_compile_options(engine_options INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(engine_options INTERFACE -fsanitize=address)
+    else()
+        message(WARNING "AddressSanitizer is not configured for compiler ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+endif()
+
+# -- SOURCES -- #
+
+add_subdirectory(Engine)
+
+add_subdirectory(Games/SimpleGame)
+add_subdirectory(Games/NetworkTest)

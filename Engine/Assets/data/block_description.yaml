@@ -1,0 +1,64 @@
+textures:
+  dirt:  dirt.png
+  glass: glass.png
+  grass_plant: grass_plant.png
+  grass_side: grass_side.png
+  grass_top: grass_top.png
+  leaves: leaves.png
+  sand: sand.png
+  snow: snow.png
+  stone: stone.png
+  water: water.png
+  wood_side: wood_side.png
+  wood_top: wood_top.png
+
+blocks:
+  0:
+    name: Air
+    opaque: false
+
+  1:
+    name: Stone
+    opaque: true
+    texture: stone
+
+  2:
+    name: Dirt
+    opaque: true
+    texture: dirt
+
+  3:
+    name: Grass
+    opaque: true
+    texture:
+      all: grass_side
+      top: grass_top
+      bottom: dirt
+  
+  4:
+    name: Water
+    opaque: false
+    texture: water
+  
+  5:
+    name: Wood
+    opaque: true
+    texture:
+      all: wood_side
+      top: wood_top
+      bottom: wood_top
+  
+  6:
+    name: Leaves
+    opaque: false
+    texture: leaves
+
+  7:
+    name: Glass
+    opaque: false
+    texture: glass
+
+  8:
+    name: Snow
+    opaque: true
+    texture: snow

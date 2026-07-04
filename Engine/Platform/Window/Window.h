@@ -2,6 +2,7 @@
 
 #include <GLFW/glfw3.h>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include "Core/NonMovable.h"
@@ -10,10 +11,16 @@
 
 #include <glm/glm.hpp>
 
+struct WindowConfig {
+    glm::ivec2 resolution = glm::ivec2(1280, 720);
+    std::string title = "Simple Window";
+    bool fullscreen = false;
+};
+
 class Window : public NonMovable, public NonCopyable {
     friend InputHandler;
 public:
-    Window(int width, int height, std::string_view title);
+    Window(const WindowConfig &config);
     ~Window();
 
     bool ShouldClose() const;
@@ -21,9 +28,13 @@ public:
     void DisableCursor() const;
     void EnableCursor() const;
 
-    GLFWwindow *GetHandle() const { return m_handle; }
+    void MakeFullscreen();
+    void MakeWindowed();
+    bool WasResized();
+    inline bool IsIconified() const { return m_window_iconified; };
 
-    glm::ivec2 GetSize();
+    GLFWwindow *GetHandle() const { return m_window; }
+    glm::ivec2 GetFramebufferSize() const { return m_resolution; }
 private:
     struct Button {
         bool pressed = false;
@@ -44,13 +55,26 @@ private:
             float offset_y = 0.0f;
         } wheel;
     } m_mouse;
+private:
+    bool m_window_resized = false;
+    bool m_window_iconified = false;
 
-    GLFWwindow *m_handle = nullptr;
+    // Framebuffer size
+    glm::ivec2 m_resolution {};
+
+    // Cached window positions/size. May be out-of-date until window monitor state changes.
+    glm::ivec2 m_windowed_position {};
+    glm::ivec2 m_windowed_size {};
+
+    GLFWmonitor *m_monitor = nullptr;
+    GLFWwindow *m_window = nullptr;
 private:
     void static ErrorCallback(int code, const char *description);
-    void static KeyCallback(GLFWwindow *window, int key, int, int action, int);
-    void static MouseButtonCallback(GLFWwindow *window, int button, int action, int);
-    void static MouseMoveCallback(GLFWwindow *window, double x, double y);
-    void static ScrollCallback(GLFWwindow *window, double, double offset_y);
-    void static ResizeCallback(GLFWwindow *window, int width, int height);
+    void static KeyCallback(GLFWwindow *handle, int key, int, int action, int);
+    void static MouseButtonCallback(GLFWwindow *handle, int button, int action, int);
+    void static MouseMoveCallback(GLFWwindow *handle, double x, double y);
+    void static ScrollCallback(GLFWwindow *handle, double, double offset_y);
+
+    void static FramebufferResizeCallback(GLFWwindow *handle, int width, int height);
+    void static IconifyCallback(GLFWwindow *handle, int iconified);
 };

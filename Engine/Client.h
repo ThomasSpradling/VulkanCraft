@@ -17,3 +17,4 @@
 
 #include "Platform/Sockets/SocketAPI.h"
 #include "Platform/Sockets/NetworkAddress.h"
+#include "Platform/Window/Window.h"

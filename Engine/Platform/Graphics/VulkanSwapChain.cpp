@@ -67,6 +67,8 @@ uint32_t VulkanSwapChain::GetImageCount() {
 void VulkanSwapChain::Recreate(SwapChainConfig config) {
     m_config = std::move(config);
 
+    vkDeviceWaitIdle(m_device.Device());
+
     DestroyFrameData();
     CreateSwapChain();
     CreateFrameData();

@@ -1,10 +1,79 @@
-if(MSVC)
-    add_compile_options(/w)
-else()
-    add_compile_options(-w)
+# Vulkan
+find_package(Vulkan REQUIRED)
+
+if(NOT TARGET vulkan::vulkan)
+    if(NOT Vulkan_LIBRARY AND Vulkan_LIBRARIES)
+        list(GET Vulkan_LIBRARIES 0 Vulkan_LIBRARY)
+    endif()
+
+    if(NOT Vulkan_INCLUDE_DIR AND Vulkan_INCLUDE_DIRS)
+        list(GET Vulkan_INCLUDE_DIRS 0 Vulkan_INCLUDE_DIR)
+    endif()
+
+    if(NOT Vulkan_LIBRARY OR NOT Vulkan_INCLUDE_DIR)
+        message(FATAL_ERROR "Vulkan found, but vulkan::vulkan could not be created")
+    endif()
+
+    add_library(vulkan::vulkan UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(vulkan::vulkan PROPERTIES
+        IMPORTED_LOCATION "${Vulkan_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIR}"
+    )
 endif()
 
-find_package(Vulkan REQUIRED)
+
+# Slang
+find_package(slang CONFIG QUIET
+    HINTS
+        "$ENV{VULKAN_SDK}/Lib/cmake"
+        "$ENV{VULKAN_SDK}/lib/cmake"
+)
+
+if(NOT TARGET slang::slang)
+    find_path(SLANG_INCLUDE_DIR
+        NAMES slang/slang.h
+        HINTS
+            "$ENV{VULKAN_SDK}/Include"
+            "$ENV{VULKAN_SDK}/include"
+        REQUIRED
+    )
+
+    find_library(SLANG_LIBRARY
+        NAMES slang-compiler slang
+        HINTS
+            "$ENV{VULKAN_SDK}/Lib"
+            "$ENV{VULKAN_SDK}/lib"
+        REQUIRED
+    )
+
+    find_file(SLANG_COMPILER_DLL
+        NAMES slang-compiler.dll slang.dll
+        HINTS
+            "$ENV{VULKAN_SDK}/Bin"
+            "$ENV{VULKAN_SDK}/bin"
+        REQUIRED
+    )
+
+    find_file(SLANG_GLSLANG_DLL
+        NAMES slang-glslang.dll
+        HINTS
+            "$ENV{VULKAN_SDK}/Bin"
+            "$ENV{VULKAN_SDK}/bin"
+        REQUIRED
+    )
+
+    add_library(slang::slang SHARED IMPORTED GLOBAL)
+    set_target_properties(slang::slang PROPERTIES
+        IMPORTED_IMPLIB "${SLANG_LIBRARY}"
+        IMPORTED_LOCATION "${SLANG_COMPILER_DLL}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SLANG_INCLUDE_DIR}"
+    )
+
+    message(STATUS "Found Slang runtime include: ${SLANG_INCLUDE_DIR}")
+    message(STATUS "Found Slang runtime library: ${SLANG_LIBRARY}")
+    message(STATUS "Found Slang compiler DLL: ${SLANG_COMPILER_DLL}")
+    message(STATUS "Found Slang glslang DLL: ${SLANG_GLSLANG_DLL}")
+endif()
 
 # GLFW
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

@@ -11,13 +11,16 @@ add_library(platform_graphics STATIC
     VulkanSwapChain.cpp
 )
 
-target_link_libraries(platform_graphics PUBLIC
+target_link_libraries(platform_graphics
+PUBLIC
     engine_options
     engine_includes
     engine_definitions
-    
+PRIVATE
     platform_window
     glm
     volk::volk
     VulkanMemoryAllocator
+    vulkan::vulkan
+    slang::slang
 )

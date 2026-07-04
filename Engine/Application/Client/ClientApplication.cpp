@@ -11,7 +11,10 @@
 ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig &config)
     : m_game(game)
 {
-    m_window = std::make_unique<Window>(config.window_width, config.window_height, config.window_title);
+    m_window = std::make_unique<Window>(WindowConfig{
+        .resolution = glm::vec2(config.window_width, config.window_height),
+        .title = config.window_title,
+    });
 
     m_renderer = std::make_unique<Renderer>(*m_window);
     m_input_handler = std::make_unique<InputHandler>(*m_window);

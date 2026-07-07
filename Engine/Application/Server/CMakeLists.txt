@@ -6,6 +6,5 @@ target_link_libraries(application_server PUBLIC
     engine_options
     engine_includes
     engine_definitions
-
     engine_network
 )

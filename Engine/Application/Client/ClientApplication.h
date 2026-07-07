@@ -31,12 +31,9 @@ public:
     void SetTargetFPS(uint32_t fps) { m_target_fps = fps; }
     void UncapFPS() { m_target_fps = std::nullopt; }
 private:
-    struct Mouse {
-        bool grabbed = false;
-        glm::vec2 position = glm::vec2(0.0f);
-    };
-private:
     IClientGame &m_game;
+
+    bool m_running = false;
 
     std::unique_ptr<Window> m_window = nullptr;
     std::unique_ptr<InputHandler> m_input_handler = nullptr;
@@ -47,7 +44,7 @@ private:
     
     uint32_t m_update_rate = 120; // Hz
     std::optional<uint32_t> m_target_fps = std::nullopt; // If nullopt, then uncapped FPS
-    uint32_t m_fps = 0;
 
-    Mouse m_mouse {};
+    const double FpsRecordTime = 500.0; // ms
+    uint32_t m_fps = 0;
 };

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
 
 VulkanSwapChain::VulkanSwapChain(const VulkanDevice &device, SwapChainConfig config)
@@ -12,34 +13,33 @@ VulkanSwapChain::VulkanSwapChain(const VulkanDevice &device, SwapChainConfig con
     , m_config(std::move(config))
 {
     CreateSwapChain();
-    std::cout << "Created swap chain.\n";
+    CreateFrameData();
+    std::cout << "Created Vulkan Swap Chain.\n";
 }
 
 VulkanSwapChain::~VulkanSwapChain() {
     DestroyFrameData();
     DestroySwapChain();
-    std::cout << "Destroyed swap chain.\n";
+    std::cout << "Destroyed Vulkan Swap Chain.\n";
 }
 
-void VulkanSwapChain::CurrentImage() {
-    
-}
-
-VulkanImage *VulkanSwapChain::AcquireNextImage(VkFence signal_fence, VkSemaphore signal_semaphore) {
+std::optional<uint32_t> VulkanSwapChain::AcquireNextImage(VkFence signal_fence, VkSemaphore signal_semaphore) {
     VkAcquireNextImageInfoKHR next_image_info {
         .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
         .swapchain = m_swapchain,
-        .timeout = 1'000'000'000,
+        .timeout = UINT64_MAX,
         .semaphore = signal_semaphore,
         .fence = signal_fence,
+        .deviceMask = 1,
     };
     uint32_t index;
     VkResult result = vkAcquireNextImage2KHR(m_device.Device(), &next_image_info, &index);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-        return nullptr;
-    VK_CHECK(result);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        return std::nullopt;
+    if (result != VK_SUBOPTIMAL_KHR)
+        VK_CHECK(result);
     m_current_swapchain_image = index;
-    return m_swapchain_images[index].get();
+    return index;
 }
 
 bool VulkanSwapChain::Present(std::span<VkSemaphore> wait_semaphores) {
@@ -60,14 +60,16 @@ bool VulkanSwapChain::Present(std::span<VkSemaphore> wait_semaphores) {
     return true;
 }
 
+VulkanImage &VulkanSwapChain::CurrentImage() {
+    return *m_swapchain_images[m_current_swapchain_image];
+}
+
 uint32_t VulkanSwapChain::GetImageCount() {
     return static_cast<uint32_t>(m_swapchain_images.size());
 }
 
 void VulkanSwapChain::Recreate(SwapChainConfig config) {
     m_config = std::move(config);
-
-    vkDeviceWaitIdle(m_device.Device());
 
     DestroyFrameData();
     CreateSwapChain();
@@ -138,8 +140,8 @@ void VulkanSwapChain::CreateSwapChain() {
         std::string chosen_mode = "";
         switch (present_mode) {
             case VK_PRESENT_MODE_MAILBOX_KHR:
-            chosen_mode = "MAILBOX";
-            break;
+                chosen_mode = "MAILBOX";
+                break;
             case VK_PRESENT_MODE_IMMEDIATE_KHR:
                 chosen_mode = "IMMEDIATE";
                 break;
@@ -200,7 +202,7 @@ void VulkanSwapChain::CreateSwapChain() {
         .imageColorSpace = m_image_properties.color_space,
         .imageExtent = VkExtent2D{ .width = m_config.width, .height = m_config.height },
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageUsage = 0,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = pre_transform,
         .compositeAlpha = composite_alpha,
@@ -208,14 +210,17 @@ void VulkanSwapChain::CreateSwapChain() {
         .clipped = VK_TRUE,
         .oldSwapchain = old_swapchain,
     };
-    m_image_properties.array_layers = swapchain_create_info.imageArrayLayers;
-    m_image_properties.usage = swapchain_create_info.imageUsage;
 
     Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Surface does not support TRANSFER_SRC", __FILE__, __LINE__);
     Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Surface does not support TRANSFER_DST", __FILE__, __LINE__);
+    Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, "Surface does not support COLOR_ATTACHMENT", __FILE__, __LINE__);
 
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    m_image_properties.array_layers = swapchain_create_info.imageArrayLayers;
+    m_image_properties.usage = swapchain_create_info.imageUsage;
 
     VK_CHECK(vkCreateSwapchainKHR(m_device.Device(), &swapchain_create_info, nullptr, &m_swapchain));
     
@@ -229,7 +234,7 @@ void VulkanSwapChain::DestroySwapChain() {
 }
 
 void VulkanSwapChain::CreateFrameData() {
-    m_config.create_callback();
+    // m_config.create_callback();
 
     //// Get Swapchain Images ////
     uint32_t image_count;
@@ -252,6 +257,6 @@ void VulkanSwapChain::CreateFrameData() {
 }
 
 void VulkanSwapChain::DestroyFrameData() {
-    m_config.destroy_callback();
+    // m_config.destroy_callback();
     m_swapchain_images.clear();
 }

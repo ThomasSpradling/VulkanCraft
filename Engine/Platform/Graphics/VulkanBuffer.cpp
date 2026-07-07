@@ -23,6 +23,11 @@ VulkanBufferBuilder &VulkanBufferBuilder::AddMemoryFlags(VmaAllocationCreateFlag
     return *this;
 }
 
+VulkanBufferBuilder &VulkanBufferBuilder::DebugName(const std::string &name) {
+    m_debug_name = name;
+    return *this;   
+}
+
 VulkanBufferBuilder &VulkanBufferBuilder::DedicateMemory() {
     m_memory_flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     return *this;
@@ -58,6 +63,9 @@ std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build(const VulkanDevice &dev
     VmaAllocationInfo allocation_info;
     VK_CHECK(vmaCreateBuffer(device.Allocator(), &buffer_create_info, &allocation_create_info, &buffer, &allocation, &allocation_info));
     
+    if (m_debug_name != "")
+        device.SetDebugName(buffer, m_debug_name);
+
     auto vk_buffer = std::make_unique<VulkanBuffer>(device);
     vk_buffer->m_size = m_size;
     vk_buffer->m_usage = m_usage;
@@ -157,6 +165,7 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
         VkBufferCopy copy_region {
             .srcOffset = 0,
             .dstOffset = offset,
+            .size = bytes,
         };
         vkCmdCopyBuffer(cmd, staging_buffer->Buffer(), m_buffer, 1, &copy_region);
     });

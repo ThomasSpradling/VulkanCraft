@@ -1,6 +1,7 @@
 #include "VulkanDevice.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
 #include <iostream>
 #include <limits>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <print>
 #include <set>
+#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -15,15 +17,19 @@
 #include <GLFW/glfw3.h>
 
 #include "Core/errors.h"
+#include "VulkanObjects.h"
 
 VulkanDevice::VulkanDevice(const Window &window, DeviceConfig config)
-    : m_config(config) {
+    : m_config(config)
+{
     CreateVulkanInstance();
     CreateVulkanSurface(window);
     CreateVulkanDevice();
     CreateVulkanMemoryAllocator();
-
+    
     CreateImmediateObjects();
+
+    std::cout << "Created Vulkan Device.\n";    
 }
 
 VulkanDevice::~VulkanDevice() {
@@ -33,6 +39,8 @@ VulkanDevice::~VulkanDevice() {
     DestroyVulkanDevice();
     DestroyVulkanSurface();
     DestroyVulkanInstance();
+
+    std::cout << "Destroyed Vulkan Device.\n";
 }
 
 VkQueue VulkanDevice::Queue(QueueType type) const {
@@ -117,6 +125,77 @@ void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(VkCo
     }
 }
 
+void VulkanDevice::QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence) {
+    // Wait Semaphores
+    std::vector<VkSemaphoreSubmitInfo> wait_semaphores;
+    wait_semaphores.resize(submit_info.wait_semaphores.size());
+
+    std::ranges::transform(submit_info.wait_semaphores.begin(), submit_info.wait_semaphores.end(), wait_semaphores.begin(), [](const QueueSubmitInfo::SemaphoreSubmit &semaphore) {
+        return VkSemaphoreSubmitInfo {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = semaphore.semaphore->Handle(),
+            .value = semaphore.value,
+            .stageMask = semaphore.stage,
+        };
+    });
+
+    // Signal Semaphores
+    std::vector<VkSemaphoreSubmitInfo> signal_semaphores;
+    signal_semaphores.resize(submit_info.signal_semaphores.size());
+
+    std::ranges::transform(submit_info.signal_semaphores.begin(), submit_info.signal_semaphores.end(), signal_semaphores.begin(), [](const QueueSubmitInfo::SemaphoreSubmit &semaphore) {
+        return VkSemaphoreSubmitInfo {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = semaphore.semaphore->Handle(),
+            .value = semaphore.value,
+            .stageMask = semaphore.stage,
+        };
+    });
+
+    // Command Buffers
+    std::vector<VkCommandBufferSubmitInfo> command_buffers;
+    command_buffers.resize(submit_info.command_buffers.size());
+
+    std::ranges::transform(submit_info.command_buffers.begin(), submit_info.command_buffers.end(), command_buffers.begin(), [](const CommandBuffer *buffer) {
+        return VkCommandBufferSubmitInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = buffer->Handle(),
+        };
+    });
+    
+    VkSubmitInfo2 vk_submit_info {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .waitSemaphoreInfoCount = static_cast<uint32_t>(wait_semaphores.size()),
+        .pWaitSemaphoreInfos = wait_semaphores.data(),
+        .commandBufferInfoCount = static_cast<uint32_t>(command_buffers.size()),
+        .pCommandBufferInfos = command_buffers.data(),
+        .signalSemaphoreInfoCount = static_cast<uint32_t>(signal_semaphores.size()),
+        .pSignalSemaphoreInfos = signal_semaphores.data(),
+    };
+    
+    VK_CHECK(vkQueueSubmit2(Queue(type), 1, &vk_submit_info, fence.Handle()));
+}
+
+std::unique_ptr<ShaderModule> VulkanDevice::CreateShaderModule(const std::vector<uint32_t> &spriv_code) const {
+    return std::make_unique<ShaderModule>(*this, spriv_code);
+}
+
+std::unique_ptr<VulkanSemaphore> VulkanDevice::CreateBinarySemaphore() const {
+    return std::make_unique<VulkanSemaphore>(*this);
+}
+
+std::unique_ptr<VulkanSemaphore> VulkanDevice::CreateTimelineSemaphore(uint64_t initial_value) const {
+    return std::make_unique<VulkanSemaphore>(*this, SemaphoreType::Timeline, initial_value);
+}
+
+std::unique_ptr<VulkanFence> VulkanDevice::CreateFence(bool signalled) const {
+    return std::make_unique<VulkanFence>(*this, signalled);
+}
+
+std::unique_ptr<VulkanCommandPool> VulkanDevice::CreateCommandPool(QueueType queue, VkCommandPoolCreateFlags flags) const {
+    return std::make_unique<VulkanCommandPool>(*this, queue, flags);
+}
+
 void VulkanDevice::CreateVulkanInstance() {
     VK_CHECK(volkInitialize());
 
@@ -128,10 +207,6 @@ void VulkanDevice::CreateVulkanInstance() {
     if (m_config.enable_validation) {
         requested_layers.emplace_back("VK_LAYER_KHRONOS_validation");
         requested_extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-
-    if (m_config.enable_validation) {
-        requested_extensions.emplace_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
     }
 
     // Add GLFW-needed extensions
@@ -171,7 +246,7 @@ void VulkanDevice::CreateVulkanInstance() {
                 }
             }
 
-            std::cerr << "Required instance extension unvailable: " << extension_name << "\n";
+            std::cerr << "Requested instance extension unvailable: " << extension_name << "\n";
         };
 
         for (auto &ext : requested_extensions) {
@@ -228,6 +303,7 @@ void VulkanDevice::CreateVulkanInstance() {
     //// Prepare Debug Messenger ////
 
     VkDebugUtilsMessengerCreateInfoEXT debug_messenger_create_info {};
+
     if (m_config.enable_validation) {
         debug_messenger_create_info = {
             .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -239,24 +315,6 @@ void VulkanDevice::CreateVulkanInstance() {
         };
 
         instance_create_info.pNext = &debug_messenger_create_info;
-        
-        std::vector<VkValidationFeatureEnableEXT> enables = {
-            VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-            VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-        };
-
-        if (m_config.enable_gpu_assisted) {
-            enables.emplace_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT);
-            enables.emplace_back(VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
-        }
-
-        VkValidationFeaturesEXT validation_features {
-            .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
-            .enabledValidationFeatureCount = static_cast<uint32_t>(enables.size()),
-            .pEnabledValidationFeatures = enables.data(),
-        };
-
-        debug_messenger_create_info.pNext = &validation_features;
     }
 
     //// Create Instance ////
@@ -312,7 +370,10 @@ void VulkanDevice::CreateVulkanDevice() {
                 }
             }
 
-            throw std::runtime_error(std::format("Required extension unavailable: {}", extension_name));
+            std::cerr << "Requested extension unavailable: " << extension_name << ".\n";
+
+            if (extension_name == std::string(VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+                throw std::runtime_error("  This was a mandatory extension.");
         };
 
         for (auto &ext : requested_extensions) {
@@ -327,17 +388,32 @@ void VulkanDevice::CreateVulkanDevice() {
 
     // Enabling Vulkan features
     std::vector<VkBaseOutStructure *> feature_chain;
-    VkPhysicalDeviceVulkan12Features feat12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    // VkPhysicalDeviceFeatures feat10 = {
+    //     .geometryShader = VK_TRUE,
+    //     .sampleRateShading = VK_TRUE,
+    //     .multiDrawIndirect = VK_TRUE,
+    // };
+
+    VkPhysicalDeviceVulkan11Features feat11 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .shaderDrawParameters = VK_TRUE,
+    };
+
+    VkPhysicalDeviceVulkan12Features feat12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .descriptorIndexing = VK_TRUE,
-        .bufferDeviceAddress = VK_TRUE };
+        .bufferDeviceAddress = VK_TRUE,
+    };
 
     VkPhysicalDeviceVulkan13Features feat13 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = nullptr,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
+        .maintenance4 = VK_TRUE,
     };
 
+    feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat11));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat12));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat13));
 
@@ -383,14 +459,14 @@ void VulkanDevice::CreateVulkanMemoryAllocator() {
         .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
     };
 
-    VmaAllocatorCreateInfo allocatorInfo = {
+    VmaAllocatorCreateInfo allocator_info = {
         .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
         .physicalDevice = m_physical_device,
         .device = m_device,
         .pVulkanFunctions = &vulkan_functions,
         .instance = m_instance,
     };
-    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
+    VK_CHECK(vmaCreateAllocator(&allocator_info, &m_allocator));
 }
 
 void VulkanDevice::DestroyVulkanMemoryAllocator() {
@@ -517,7 +593,7 @@ VkPhysicalDevice VulkanDevice::ChoosePhysicalDevice() {
 std::vector<VkDeviceQueueCreateInfo> VulkanDevice::ChooseQueues() {
     std::vector<VkDeviceQueueCreateInfo> result {};
 
-    const float queue_priority = 1.0f;
+    static constexpr float queue_priority = 1.0f;
     constexpr uint32_t invalid_family = std::numeric_limits<uint32_t>::max();
 
     uint32_t graphics_compute_family = invalid_family;
@@ -614,7 +690,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::DebugCallback(VkDebugUtilsMessageSe
     else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
         prefix = "ERROR";
 
-    std::print(stderr, "Validation Message [{}]: {{}}", prefix.c_str(), callback_data->pMessage);
+    std::print(stderr, "Validation Message [{}]: {}\n", prefix.c_str(), callback_data->pMessage);
 
     return VK_FALSE;
 }

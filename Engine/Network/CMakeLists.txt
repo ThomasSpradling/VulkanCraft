@@ -7,9 +7,7 @@ target_link_libraries(engine_network PUBLIC
     engine_options
     engine_includes
     engine_definitions
-    
-    glm
-
     platform_sockets
+    glm
     crc32
 )

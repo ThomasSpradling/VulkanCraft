@@ -1,17 +1,19 @@
 #pragma once
 
+#include "Core/NonCopyable.h"
+#include "Core/NonMovable.h"
 #include <array>
 #include <glm/glm.hpp>
 
 class Window;
-class InputHandler {
+class InputHandler : public NonMovable, public NonCopyable {
 public:
     InputHandler(Window &window);
-    ~InputHandler();
+    ~InputHandler() = default;
 
     // Note: Should be called as late as possible in the update cycle since it handles
     // pressing logic
-    void Update(float delta_time);
+    void Update();
 
     bool IsKeyPressed(int key) const;
     bool IsKeyDown(int key) const;

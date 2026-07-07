@@ -24,11 +24,11 @@ public:
     VulkanSwapChain(const VulkanDevice &device, SwapChainConfig config);
     ~VulkanSwapChain();
 
-    void CurrentImage();
+    VulkanImage &CurrentImage();
     uint32_t GetImageCount();
 
-    // Returns nullptr if it cannot be done successfully
-    VulkanImage *AcquireNextImage(VkFence signal_fence, VkSemaphore signal_semaphore);
+    // Returns nullopt if it cannot be done successfully
+    std::optional<uint32_t> AcquireNextImage(VkFence signal_fence, VkSemaphore signal_semaphore);
 
     // Returns whether this was done successfully
     bool Present(std::span<VkSemaphore> wait_semaphores = {});

@@ -8,9 +8,9 @@ target_link_libraries(engine_renderer PUBLIC
     engine_options
     engine_includes
     engine_definitions
-    
     platform_graphics
     platform_window
     imgui
     tinygltf
+    slang::slang
 )

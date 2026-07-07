@@ -1,12 +1,19 @@
 #include "PipelineBuilder.h"
+#include "Platform/Graphics/Common.h"
+#include <algorithm>
 #include <cassert>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 /////////////////////////////////////////
 // ---- Graphics Pipeline Builder ---- //
 /////////////////////////////////////////
 
-PipelineBuilder_Graphics::PipelineBuilder_Graphics(VkPipelineLayout layout)
-    : m_pipeline_layout(layout)
+PipelineBuilder_Graphics::PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout)
+    : m_device(device)
+    , m_pipeline_layout(layout)
 {}
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::FromBase(VkPipeline base_pipeline) {
@@ -35,20 +42,52 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddAttribute(uint32_t locati
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddShaderStage(VkShaderStageFlagBits shader_stage, VkShaderModule shader_module) {
-    m_stages.push_back({
-        .shader_module = shader_module,
-        .stage = shader_stage
-    });
-    return *this;
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::VertexShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::Vertex, m_vertex_shader, shader, entry);
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddTesselationStage(VkShaderModule shader_control_module, VkShaderModule shader_eval_module, uint32_t patch_control_points) {
-    SetTopology(VK_PRIMITIVE_TOPOLOGY_PATCH_LIST);
-    
-    AddShaderStage(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, shader_control_module);
-    AddShaderStage(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, shader_eval_module);
-    m_patch_control_points = patch_control_points;
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::FragmentShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::Fragment, m_fragment_shader, shader, entry);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::TessellationControlShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::TessellationControl, m_tesselation_control_shader, shader, entry);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::TessellationEvaluationShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::TessellationEvaluation, m_tesselation_eval_shader, shader, entry);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::GeometryShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::Geometry, m_geometry_shader, shader, entry);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddShader(const CompiledShader &shader) {
+    if (m_shaders.contains(shader.module_name))
+        return *this;
+
+    m_shaders[shader.module_name] = shader;
+
+    const auto fill_shader_entry = [&](std::optional<ShaderEntry> &entry, ShaderStage shader_stage) {
+        const auto entries = shader.entry_points.find(shader_stage);
+        if (entries == shader.entry_points.end())
+            return;
+
+        if (entries->second.empty())
+            return;
+
+        entry = ShaderEntry {
+            .module_name = shader.module_name,
+            .entry_name = entries->second[0],
+            .shader_stage = shader_stage,
+        };
+    };
+
+    fill_shader_entry(m_vertex_shader, ShaderStage::Vertex);
+    fill_shader_entry(m_geometry_shader, ShaderStage::Geometry);
+    fill_shader_entry(m_tesselation_control_shader, ShaderStage::TessellationControl);
+    fill_shader_entry(m_tesselation_eval_shader, ShaderStage::TessellationEvaluation);
+    fill_shader_entry(m_fragment_shader, ShaderStage::Fragment);
 
     return *this;
 }
@@ -60,6 +99,11 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetTopology(VkPrimitiveTopol
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnablePrimitiveRestart(bool enable_primitive_restart) {
     m_input_assembly_state.primitive_restart = enable_primitive_restart ? VK_TRUE : VK_FALSE;
+    return *this;
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetPatchControlPoints(uint32_t count) {
+    m_patch_control_points = count;
     return *this;
 }
 
@@ -100,7 +144,7 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableDepthWrite() {
 }
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableStencilTest() {
-    m_stencil_state.stencil_test_enabled = VK_FALSE;
+    m_stencil_state.stencil_test_enabled = VK_TRUE;
     return *this;
 }
 
@@ -227,29 +271,44 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetStencilAttachmentFormat(V
     return *this;
 }
 
-VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
+VkPipeline PipelineBuilder_Graphics::Build() {
     VkPipeline pipeline;
 
-    // (1) Create shader stages
+    //// Create Shader Stages ////
+    std::vector<VkPipelineShaderStageCreateInfo> shader_stages {};
+    Assert(m_vertex_shader, "A graphic pipeline must have a vertex shader!");
+    Assert(m_fragment_shader, "A graphic pipeline must have a fragment shader!");
 
-    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
-    shader_stages.reserve(m_stages.size());
-    for (const auto &stage : m_stages) {
-        VkPipelineShaderStageCreateInfo stage_create_info {
+    std::unordered_map<std::string, std::unique_ptr<ShaderModule>> shader_modules {};
+    for (const auto &[name, shader] : m_shaders) {
+        shader_modules[name] = m_device.CreateShaderModule(shader.spirv_code);
+    }
+
+    const auto append_shader_stage_info = [&](const std::optional<ShaderEntry> &entry, ShaderStage stage) {
+        if (!entry)
+            return;
+
+        VkPipelineShaderStageCreateInfo create_info {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = stage.stage,
-            .module = stage.shader_module,
-            .pName = "main",
+            .stage = GetVulkanShaderStage(stage),
+            .module = shader_modules[entry->module_name]->Handle(),
+            .pName = entry->entry_name.c_str(),
             .pSpecializationInfo = nullptr,
         };
-        shader_stages.push_back(stage_create_info);
-    }
+
+        shader_stages.push_back(create_info);
+    };
+    
+    append_shader_stage_info(m_vertex_shader, ShaderStage::Vertex);
+    append_shader_stage_info(m_geometry_shader, ShaderStage::Geometry);
+    append_shader_stage_info(m_tesselation_control_shader, ShaderStage::TessellationControl);
+    append_shader_stage_info(m_tesselation_eval_shader, ShaderStage::TessellationEvaluation);
+    append_shader_stage_info(m_fragment_shader, ShaderStage::Fragment);
 
     assert(shader_stages.size() > 0 && "Cannot create pipeline without any shader stages!");
     assert(m_pipeline_layout != VK_NULL_HANDLE && "Cannot create pipeline without a pipeline layout!");
 
-    // (2) Get vertex layouts
-
+    //// Get vertex layouts ////
     VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -259,8 +318,7 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .pVertexAttributeDescriptions = m_vertex_input_state.attribute_descriptions.data(),
     };
 
-    // (3) Input assembly
-
+    //// Input assembly ////
     VkPipelineInputAssemblyStateCreateInfo input_assembly_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -268,16 +326,15 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .primitiveRestartEnable = m_input_assembly_state.primitive_restart,
     };
 
-    // (4) Control points
-    const bool has_tessellation_stage = m_patch_control_points.has_value();
-
+    //// Control points ////
+    const bool has_tessellation_stage = m_tesselation_control_shader.has_value() || m_tesselation_eval_shader.has_value();
     VkPipelineTessellationStateCreateInfo tessellation_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
         .pNext = nullptr,
-        .patchControlPoints = has_tessellation_stage ? *m_patch_control_points : 1,
+        .patchControlPoints = m_patch_control_points.value_or(3),
     };
 
-    // (5) Viewport
+    //// Viewport ////
     VkPipelineViewportStateCreateInfo viewport_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -285,7 +342,7 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .scissorCount = 1,
     };
 
-    // (6) Rasterizer
+    //// Rasterizer ////
     VkPipelineRasterizationStateCreateInfo rasterization_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -297,14 +354,14 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .lineWidth = m_rasterization_state.line_width,
     };
 
-    // (7) Multisampling
+    //// Multisampling ////
     VkPipelineMultisampleStateCreateInfo multisample_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .pNext = nullptr,
         .rasterizationSamples = m_multisample_state.sample_count,
     };
 
-    // (8) Depth/stencil tests
+    //// Depth/stencil tests ////
     VkPipelineDepthStencilStateCreateInfo depth_stencil_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -314,7 +371,7 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .stencilTestEnable = m_stencil_state.stencil_test_enabled,
     };
 
-    // (9) Color blending
+    //// Color Blending ////
     VkPipelineColorBlendAttachmentState color_blend_attachment {
         .blendEnable = m_color_blend_state.blend_enable,
         .srcColorBlendFactor = m_color_blend_state.src_color_blend_factor,
@@ -335,7 +392,7 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .pAttachments = &color_blend_attachment,
     };
 
-    // (10) Dynamic state
+    //// Dynamic State ////
 
     VkPipelineDynamicStateCreateInfo dynamic_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -344,7 +401,7 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         .pDynamicStates = m_dynamic_state.data(),
     };
 
-    // Finally: Putting it all together
+    //// Create Pipeline ////
 
     VkPipelineRenderingCreateInfoKHR rendering_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -383,42 +440,86 @@ VkPipeline PipelineBuilder_Graphics::Build(const VulkanDevice &device) {
         pipeline_create_info.basePipelineIndex = -1;
     }
 
-    vkCreateGraphicsPipelines(device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline);
+    VK_CHECK(vkCreateGraphicsPipelines(m_device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
 
     return pipeline;
+}
+
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::EmplaceShader(ShaderStage stage, std::optional<ShaderEntry> &out_entry, const CompiledShader &shader, const std::string &entry) {
+    AddShader(shader);
+
+    const auto entries = shader.entry_points.find(stage);
+    if (entries == shader.entry_points.end())
+        throw std::runtime_error("Shader module " + shader.module_name + " does not contain requested stage!");
+
+    if (std::ranges::find(entries->second, entry) == entries->second.end())
+        throw std::runtime_error("There is no entry " + entry + "() in shader module " + shader.module_name);
+
+    out_entry = ShaderEntry {
+        .module_name = shader.module_name,
+        .entry_name = entry,
+        .shader_stage = stage,
+    };
+
+    return *this;
 }
 
 ////////////////////////////////////////
 // ---- Compute Pipeline Builder ---- //
 ////////////////////////////////////////
 
-PipelineBuilder_Compute::PipelineBuilder_Compute(VkPipelineLayout layout)
-    : m_pipeline_layout(layout)
+PipelineBuilder_Compute::PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout)
+    : m_device(device)
+    , m_pipeline_layout(layout)
 {}
 
-PipelineBuilder_Compute &PipelineBuilder_Compute::SetShaderStage(VkShaderModule shader_module) {
-    m_compute_stage.shader_module = shader_module;
+PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader &shader, const std::string &entry_name) {
+    const auto entries = shader.entry_points.find(ShaderStage::Compute);
+    if (entries == shader.entry_points.end())
+        throw std::runtime_error("Shader module " + shader.module_name + " does not contain a compute shader!");
+
+    Assert(entries->second.size() > 0, "Cannot use compute shader without any entries!");
+
+    const std::string entry = entry_name.empty() ? entries->second[0] : entry_name;
+
+    if (m_shader.module_name == shader.module_name && m_compute_shader.entry_name == entry)
+        return *this;
+
+    if (std::ranges::find(entries->second, entry) == entries->second.end())
+        throw std::runtime_error("Cannot find entry " + entry + "() in module " + shader.module_name);
+
+    m_shader = shader;
+
+    m_compute_shader = ShaderEntry {
+        .module_name = shader.module_name,
+        .entry_name = entry,
+        .shader_stage = ShaderStage::Compute,
+    };
+
     return *this;
 }
 
-VkPipeline PipelineBuilder_Compute::Build(const VulkanDevice &device) {
-    VkPipelineShaderStageCreateInfo stage_create_info {
+VkPipeline PipelineBuilder_Compute::Build() {
+    std::unique_ptr<ShaderModule> shader_module = m_device.CreateShaderModule(m_shader.spirv_code);
+
+    Assert(m_compute_shader.shader_stage == ShaderStage::Compute, "Expected compute shader to have type of compute!");
+    VkPipelineShaderStageCreateInfo shader_stage {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = m_compute_stage.shader_module,
-        .pName = "main",
-        .pSpecializationInfo = nullptr,
+        .module = shader_module->Handle(),
+        .pName = m_compute_shader.entry_name.c_str(),
     };
 
     VkComputePipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
-        .stage = stage_create_info,
+        .stage = shader_stage,
         .layout = m_pipeline_layout,
     };
 
     VkPipeline pipeline;
-    vkCreateComputePipelines(device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline);
+    VK_CHECK(vkCreateComputePipelines(m_device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
     return pipeline;
 }
 
@@ -426,85 +527,75 @@ VkPipeline PipelineBuilder_Compute::Build(const VulkanDevice &device) {
 // ---- RayTracing Pipeline Builder ---- //
 ///////////////////////////////////////////
 
-PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(VkPipelineLayout layout)
-    : m_pipeline_layout(layout)
+PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout)
+    : m_device(device)
+    , m_pipeline_layout(layout)
 {}
 
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddGeneralGroup(VkShaderStageFlagBits stage, VkShaderModule shader_module) {
-    m_stages.push_back({
-        .shader_module = shader_module,
-        .stage = stage,
-    });
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddShader(const CompiledShader &shader) {
+    if (m_shaders.contains(shader.module_name))
+        return *this;
 
-    VkRayTracingShaderGroupCreateInfoKHR group_create_info {
+    m_shaders[shader.module_name] = shader;
+    return *this;
+}
+
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddGeneralGroup(const ModuleEntry &shader) {
+    const uint32_t shader_index = ComputeShaderIndex(shader, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR);
+
+    m_groups.push_back({
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .pNext = nullptr,
         .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-        .generalShader = static_cast<uint32_t>(m_stages.size() - 1),
+        .generalShader = shader_index,
         .closestHitShader = VK_SHADER_UNUSED_KHR,
         .anyHitShader = VK_SHADER_UNUSED_KHR,
         .intersectionShader = VK_SHADER_UNUSED_KHR,
-    };
-
-    m_groups.push_back(group_create_info);
+    });
 
     return *this;
 }
 
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddTriangleHitGroup(VkShaderModule chit_shader_module, std::optional<VkShaderModule> ahit_shader_module) {
-    m_stages.push_back({
-        .shader_module = chit_shader_module,
-        .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-    });
-    auto chit_index = static_cast<uint32_t>(m_stages.size() - 1);
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddTriangleHitGroup(const ModuleEntry &chit_shader, const ModuleEntry &ahit_shader) {
+    const uint32_t chit_index = chit_shader.is_valid ? ComputeShaderIndex(chit_shader, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) : VK_SHADER_UNUSED_KHR;
+    const uint32_t ahit_index = ahit_shader.is_valid ? ComputeShaderIndex(ahit_shader, VK_SHADER_STAGE_ANY_HIT_BIT_KHR) : VK_SHADER_UNUSED_KHR;
 
-    uint32_t ahit_index = VK_SHADER_UNUSED_KHR;
-    if (ahit_shader_module.has_value()) {
-        m_stages.push_back({
-            .shader_module = *ahit_shader_module,
-            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-        });
-        ahit_index = static_cast<uint32_t>(m_stages.size() - 1);
-    }
+    if (chit_index == VK_SHADER_UNUSED_KHR && ahit_index == VK_SHADER_UNUSED_KHR)
+        throw std::runtime_error("Triangle hit group needs at least a closest-hit or any-hit shader!");
 
-    VkRayTracingShaderGroupCreateInfoKHR group_create_info {
+    m_groups.push_back({
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .pNext = nullptr,
         .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
         .generalShader = VK_SHADER_UNUSED_KHR,
         .closestHitShader = chit_index,
         .anyHitShader = ahit_index,
         .intersectionShader = VK_SHADER_UNUSED_KHR,
-    };
+    });
 
-    m_groups.push_back(group_create_info);
     return *this;
 }
 
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddProceduralHitGroup(VkShaderModule intersect_shader_module, std::optional<VkShaderModule> ahit_shader_module) {
-    auto intersect_index = static_cast<uint32_t>(m_stages.size() - 1);
-    m_stages.push_back({
-        .shader_module = intersect_shader_module,
-        .stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
-    });
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddProceduralHitGroup(const ModuleEntry &intersection_shader, const ModuleEntry &chit_shader, const ModuleEntry &ahit_shader) {
+    const uint32_t intersection_index = ComputeShaderIndex(intersection_shader, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
+    const uint32_t chit_index = chit_shader.is_valid ? ComputeShaderIndex(chit_shader, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) : VK_SHADER_UNUSED_KHR;
+    const uint32_t ahit_index = ahit_shader.is_valid ? ComputeShaderIndex(ahit_shader, VK_SHADER_STAGE_ANY_HIT_BIT_KHR) : VK_SHADER_UNUSED_KHR;
 
-    uint32_t ahit_index = VK_SHADER_UNUSED_KHR;
-    if (ahit_shader_module.has_value()) {
-        m_stages.push_back({
-            .shader_module = *ahit_shader_module,
-            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-        });
-        ahit_index = static_cast<uint32_t>(m_stages.size() - 1);
-    }
-
-    VkRayTracingShaderGroupCreateInfoKHR group_create_info {
+    m_groups.push_back({
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .pNext = nullptr,
         .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
         .generalShader = VK_SHADER_UNUSED_KHR,
-        .closestHitShader = VK_SHADER_UNUSED_KHR,
+        .closestHitShader = chit_index,
         .anyHitShader = ahit_index,
-        .intersectionShader = intersect_index,
-    };
+        .intersectionShader = intersection_index,
+    });
 
-    m_groups.push_back(group_create_info);
+    return *this;
+}
+
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetLayout(VkPipelineLayout pipeline_layout) {
+    m_pipeline_layout = pipeline_layout;
     return *this;
 }
 
@@ -523,24 +614,35 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDynamicState(VkDynami
     return *this;
 }
 
-VkPipeline PipelineBuilder_RayTracing::Build(const VulkanDevice &device) {
+VkPipeline PipelineBuilder_RayTracing::Build() {
+    Assert(!m_shader_entries.empty(), "Cannot create raytracing pipeline without shader stages!");
+    Assert(!m_groups.empty(), "Cannot create raytracing pipeline without shader groups!");
+    Assert(m_pipeline_layout != VK_NULL_HANDLE, "Cannot create raytracing pipeline without a pipeline layout!");
 
-    // (1) Create shader stages
+    //// Create Shader Modules ////
 
-    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
-    shader_stages.reserve(m_stages.size());
-    for (const auto &stage : m_stages) {
-        VkPipelineShaderStageCreateInfo stage_create_info {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = stage.stage,
-            .module = stage.shader_module,
-            .pName = "main",
-            .pSpecializationInfo = nullptr,
-        };
-        shader_stages.push_back(stage_create_info);
+    std::unordered_map<std::string, std::unique_ptr<ShaderModule>> shader_modules {};
+    for (const auto &[name, shader] : m_shaders) {
+        shader_modules[name] = m_device.CreateShaderModule(shader.spirv_code);
     }
 
-    // (2) Dynamic state
+    //// Create Shader Stages ////
+
+    std::vector<VkPipelineShaderStageCreateInfo> shader_stages {};
+    shader_stages.reserve(m_shader_entries.size());
+
+    for (const ShaderEntry &entry : m_shader_entries) {
+        shader_stages.push_back({
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .stage = GetVulkanShaderStage(entry.shader_stage),
+            .module = shader_modules[entry.module_name]->Handle(),
+            .pName = entry.entry_name.c_str(),
+            .pSpecializationInfo = nullptr,
+        });
+    }
+
+    //// Dynamic State ////
 
     VkPipelineDynamicStateCreateInfo dynamic_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -549,7 +651,9 @@ VkPipeline PipelineBuilder_RayTracing::Build(const VulkanDevice &device) {
         .pDynamicStates = m_dynamic_state.data(),
     };
 
-    VkRayTracingPipelineCreateInfoKHR raytracing_pipeline_create_info {
+    //// Create Pipeline ////
+
+    VkRayTracingPipelineCreateInfoKHR pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
         .pNext = nullptr,
         .stageCount = static_cast<uint32_t>(shader_stages.size()),
@@ -561,7 +665,53 @@ VkPipeline PipelineBuilder_RayTracing::Build(const VulkanDevice &device) {
         .layout = m_pipeline_layout,
     };
 
-    VkPipeline pipeline;
-    vkCreateRayTracingPipelinesKHR(device.Device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &raytracing_pipeline_create_info, nullptr, &pipeline);
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateRayTracingPipelinesKHR(m_device.Device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
     return pipeline;
+}
+
+uint32_t PipelineBuilder_RayTracing::ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages) {
+    if (!entry.is_valid)
+        throw std::runtime_error("Invalid raytracing shader entry!");
+
+    for (uint32_t i = 0; i < m_shader_entries.size(); i++) {
+        const ShaderEntry &shader_entry = m_shader_entries[i];
+
+        if (shader_entry.module_name != entry.module_name)
+            continue;
+
+        if (shader_entry.entry_name != entry.entry_point)
+            continue;
+
+        const VkShaderStageFlags stage = GetVulkanShaderStage(shader_entry.shader_stage);
+        if ((stage & allowed_stages) != 0)
+            return i;
+    }
+
+    const auto shader = m_shaders.find(entry.module_name);
+    if (shader == m_shaders.end())
+        throw std::runtime_error("Shader module '" + entry.module_name + "' was not added to the raytracing pipeline!");
+
+    for (const auto &[shader_stage, entries] : shader->second.entry_points) {
+        const VkShaderStageFlags vulkan_stage = GetVulkanShaderStage(shader_stage);
+        if ((vulkan_stage & allowed_stages) == 0)
+            continue;
+
+        for (const std::string &entry_name : entries) {
+            if (entry_name != entry.entry_point)
+                continue;
+
+            auto index = static_cast<uint32_t>(m_shader_entries.size());
+
+            m_shader_entries.push_back({
+                .module_name = entry.module_name,
+                .entry_name = entry.entry_point,
+                .shader_stage = shader_stage,
+            });
+
+            return index;
+        }
+    }
+
+    throw std::runtime_error("Could not find raytracing entry " + entry.entry_point + "() in shader module '" + entry.module_name + "'!");
 }

@@ -118,6 +118,8 @@ public:
     VkImageView CreateImageView();
     VkImageView CreateImageView(VkImageSubresourceRange subresource_range);
 
+    VkImageView View() { return m_image_view; }
+
     VkImage Image() const { return m_image; }
     VmaAllocation Allocation() const { return m_allocation; }
     VkExtent3D Extent() const { return m_extent; }

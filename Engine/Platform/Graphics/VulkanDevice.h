@@ -7,6 +7,7 @@
 #include "Core/NonMovable.h"
 #include "Common.h"
 #include "Platform/Window/Window.h"
+#include "VulkanObjects.h"
 
 struct DeviceConfig {
     bool enable_validation = static_cast<bool>(ENGINE_ENABLE_VALIDATION_LAYERS);
@@ -20,6 +21,24 @@ enum class QueueType : uint8_t {
     Compute,
     Transfer,
     DedicatedCompute,
+};
+
+struct QueueSubmitInfo {
+    struct SemaphoreSubmit {
+        const VulkanSemaphore *semaphore = nullptr;
+        uint64_t value = 0;
+        VkPipelineStageFlags2 stage = 0;
+    };
+    
+    std::vector<SemaphoreSubmit> wait_semaphores;
+    std::vector<SemaphoreSubmit> signal_semaphores;
+    std::vector<const CommandBuffer *> command_buffers;
+};
+
+struct SemaphoreSubmit {
+    const VulkanSemaphore *semaphore = nullptr;
+    uint64_t value = 0;
+    VkPipelineStageFlags2 stage = 0;
 };
 
 class VulkanDevice : public NonMovable, public NonCopyable {
@@ -39,9 +58,18 @@ public:
     // Immediately submits recorded commands in the specified queue. If `async` is turned on,
     // this function will not wait for submission to be complete.
     void ImmediateSubmit(QueueType type, const std::function<void(VkCommandBuffer)> &record, bool async = false) const;
+    void QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence);
+public:
+    std::unique_ptr<ShaderModule> CreateShaderModule(const std::vector<uint32_t> &spriv_code) const;
+
+    std::unique_ptr<VulkanSemaphore> CreateBinarySemaphore() const;
+    std::unique_ptr<VulkanSemaphore> CreateTimelineSemaphore(uint64_t initial_value = 0) const;
+    std::unique_ptr<VulkanFence> CreateFence(bool signalled = true) const;
+
+    std::unique_ptr<VulkanCommandPool> CreateCommandPool(QueueType queue, VkCommandPoolCreateFlags flags = 0) const;
 public:
     template<typename T>
-    void SetDebugName(T object, std::string_view name) {
+    void SetDebugName(T object, std::string_view name) const {
         constexpr VkObjectType object_type = ObjectType<T>();
 
         if constexpr (object_type == VK_OBJECT_TYPE_UNKNOWN)
@@ -68,6 +96,7 @@ public:
 
         VK_CHECK(vkSetDebugUtilsObjectNameEXT(m_device, &debug_name_info));
     }
+
 private:
     const uint64_t ImmediateFenceMaxTimeout = 1000; // ms
 

@@ -20,6 +20,8 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
     m_input_handler = std::make_unique<InputHandler>(*m_window);
 
     m_socket_api = std::make_unique<SocketAPI>();
+    m_socket_api->Initialize();
+
     m_network_host = std::make_unique<NetworkHost>(HostType::Client);
 }
 
@@ -36,7 +38,7 @@ ClientApplication::~ClientApplication() {
 }
 
 void ClientApplication::Run() {
-    using clock = std::chrono::high_resolution_clock;
+    using clock = std::chrono::steady_clock;
 
     auto previous_time = clock::now();
 
@@ -55,8 +57,14 @@ void ClientApplication::Run() {
         .client_host = *m_network_host,
     };
 
+    m_running = true;
+
     m_game.Initialize(context);
-    while (!m_window->ShouldClose()) {
+    while (m_running) {
+        if (m_window->ShouldClose()) {
+            m_running = false;
+        }
+
         const bool HAS_CAPPED_FPS = m_target_fps.has_value();
         glfwPollEvents();
 
@@ -69,17 +77,19 @@ void ClientApplication::Run() {
         double frame_time = std::clamp(delta_time.count(), 0.0, MAX_FRAME_WAIT_TIME_MS);
         render_accum += frame_time;
         fps_timer += frame_time;
-        frame_count++;
 
         while (update_accum >= UPDATE_STEP_TIME) {
             m_game.Update(UPDATE_STEP_TIME, context);
+            m_input_handler->Update();
             update_accum -= UPDATE_STEP_TIME;
         }
 
         if (!HAS_CAPPED_FPS) {
             m_game.Render(frame_time, context);
+            frame_count++;
         } else if (const double render_step_time = 1000.0 / m_target_fps.value(); render_accum >= render_step_time) {
             m_game.Render(render_step_time, context);
+            frame_count++;
             render_accum -= render_step_time;
 
             double time_until_next_update = UPDATE_STEP_TIME - update_accum;
@@ -91,11 +101,11 @@ void ClientApplication::Run() {
             }
         }
 
-        if (fps_timer >= 1000.0) {
-            m_fps = frame_count;
+        if (fps_timer >= FpsRecordTime) {
+            m_fps = static_cast<uint32_t>(static_cast<double>(frame_count) * 1000.0 / fps_timer);
             std::cout << "FPS: " << m_fps << "\n";
             frame_count = 0;
-            fps_timer -= 1000.0;
+            fps_timer = 0.0;
         }
     }
     m_game.ShutDown(context);

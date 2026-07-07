@@ -3,3 +3,6 @@ CompileFlags:
     - /fsanitize=address
     - -fsanitize=address
     - /RTC1
+  Add:
+    - -Wno-missing-designated-field-initializers
+    

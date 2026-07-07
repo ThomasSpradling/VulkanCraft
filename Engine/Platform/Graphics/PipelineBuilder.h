@@ -1,26 +1,46 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <volk.h>
 #include <vector>
 
+#include "ShaderCompiler.h"
 #include "VulkanDevice.h"
+#include "VulkanObjects.h"
 // #include "VulkanRenderer.h"
+
+struct ShaderEntry {
+    std::string module_name;
+    std::string entry_name;
+    ShaderStage shader_stage;
+};
 
 class PipelineBuilder_Graphics {
 public:
-    PipelineBuilder_Graphics(VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
     
     PipelineBuilder_Graphics &AddBinding(uint32_t binding, uint32_t stride, VkVertexInputRate input_rate = VK_VERTEX_INPUT_RATE_VERTEX);
     PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset = 0);
 
     PipelineBuilder_Graphics &FromBase(VkPipeline base_pipeline);
 
-    PipelineBuilder_Graphics &AddShaderStage(VkShaderStageFlagBits shader_stage, VkShaderModule shader_module);
-    PipelineBuilder_Graphics &AddTesselationStage(VkShaderModule shader_control_module, VkShaderModule shader_eval_module, uint32_t patch_control_points);
+    PipelineBuilder_Graphics &AddShader(const CompiledShader &shader);
 
+    PipelineBuilder_Graphics &VertexShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &GeometryShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &TessellationControlShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &TessellationEvaluationShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &FragmentShader(const CompiledShader &shader, const std::string &entry);
+    
     PipelineBuilder_Graphics &SetTopology(VkPrimitiveTopology topology);
     PipelineBuilder_Graphics &EnablePrimitiveRestart(bool enable_primitive_restart);
+
+    PipelineBuilder_Graphics &SetPatchControlPoints(uint32_t count);
 
     PipelineBuilder_Graphics &EnableCulling(VkCullModeFlags cull_mode = VK_CULL_MODE_BACK_BIT);
     PipelineBuilder_Graphics &SetFrontFace(VkFrontFace front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -74,14 +94,17 @@ public:
     PipelineBuilder_Graphics &SetDepthAttachmentFormat(VkFormat format);
     PipelineBuilder_Graphics &SetStencilAttachmentFormat(VkFormat format);
     
-    VkPipeline Build(const VulkanDevice &device);
-private:    
-    struct ShaderStage {
-        VkShaderModule shader_module;
-        VkShaderStageFlagBits stage;
-    };
+    VkPipeline Build();
+private:
+    const VulkanDevice &m_device;
 
-    std::vector<ShaderStage> m_stages;
+    std::unordered_map<std::string, CompiledShader> m_shaders {};
+
+    std::optional<ShaderEntry> m_vertex_shader;
+    std::optional<ShaderEntry> m_geometry_shader;
+    std::optional<ShaderEntry> m_tesselation_control_shader;
+    std::optional<ShaderEntry> m_tesselation_eval_shader;
+    std::optional<ShaderEntry> m_fragment_shader;
 
     struct VertexInputState {
         std::vector<VkVertexInputBindingDescription> binding_descriptions;
@@ -147,58 +170,72 @@ private:
 
     VkPipeline m_base_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
+private:
+    PipelineBuilder_Graphics &EmplaceShader(ShaderStage stage, std::optional<ShaderEntry> &out_entry, const CompiledShader &shader, const std::string &entry);
 };
 
 class PipelineBuilder_Compute {
 public:
-    PipelineBuilder_Compute(VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
 
-    PipelineBuilder_Compute &SetShaderStage(VkShaderModule shader_module);
+    PipelineBuilder_Compute &SetShader(const CompiledShader &shader, const std::string &entry_name = "");
 
-    VkPipeline Build(const VulkanDevice &device);
+    VkPipeline Build();
 private:
-    struct ShaderStage {
-        VkShaderModule shader_module;
-    };
-private:
-    ShaderStage m_compute_stage;
+    const VulkanDevice &m_device;
+
+    CompiledShader m_shader;
+    ShaderEntry m_compute_shader;
 
     VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
 };
 
+struct ModuleEntry {
+    bool is_valid = false;
+
+    std::string module_name;
+    std::string entry_point;
+
+    ModuleEntry() = default;
+    ModuleEntry(std::nullptr_t) {}
+
+    ModuleEntry(const CompiledShader &shader, std::string entry)
+        : is_valid(true)
+        , module_name(shader.module_name)
+        , entry_point(std::move(entry)) {}
+};
+
 class PipelineBuilder_RayTracing {
 public:
-    PipelineBuilder_RayTracing(VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
 
-    // Add one of raygen, miss, or callable
-    PipelineBuilder_RayTracing &AddGeneralGroup(VkShaderStageFlagBits stage, VkShaderModule shader_module);
+    PipelineBuilder_RayTracing &AddShader(const CompiledShader &shader);
 
-    // Closest hit and any hit
-    PipelineBuilder_RayTracing &AddTriangleHitGroup(VkShaderModule chit_shader_module, std::optional<VkShaderModule> ahit_shader_module = std::nullopt);
+    PipelineBuilder_RayTracing &AddGeneralGroup(const ModuleEntry &shader);
+    PipelineBuilder_RayTracing &AddTriangleHitGroup(const ModuleEntry &chit_shader = nullptr, const ModuleEntry &ahit_shader = nullptr);
+    PipelineBuilder_RayTracing &AddProceduralHitGroup(const ModuleEntry &intersection_shader, const ModuleEntry &chit_shader = nullptr, const ModuleEntry &ahit_shader = nullptr);
 
-    // Intersect or any hit
-    PipelineBuilder_RayTracing &AddProceduralHitGroup(VkShaderModule intersect_shader_module, std::optional<VkShaderModule> ahit_shader_module = std::nullopt);
-
+    PipelineBuilder_RayTracing &SetLayout(VkPipelineLayout pipeline_layout);
     PipelineBuilder_RayTracing &SetMaxRayRecursionDepth(uint32_t value = 1);
 
     PipelineBuilder_RayTracing &ClearDynamicState();
     PipelineBuilder_RayTracing &AddDynamicState(VkDynamicState dynamic_state);
 
-    const std::vector<VkRayTracingShaderGroupCreateInfoKHR> &GetGroups() { return m_groups; }
+    const std::vector<VkRayTracingShaderGroupCreateInfoKHR> &GetGroups() const { return m_groups; }
 
-    VkPipeline Build(const VulkanDevice &device);
+    VkPipeline Build();
+
 private:
-    struct ShaderStage {
-        VkShaderModule shader_module;
-        VkShaderStageFlagBits stage;
-    };
-private:
+    const VulkanDevice &m_device;
+
+    std::unordered_map<std::string, CompiledShader> m_shaders {};
+    std::vector<ShaderEntry> m_shader_entries {};
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> m_groups {};
+    std::vector<VkDynamicState> m_dynamic_state {};
+
     VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
-
     uint32_t m_max_recursion_depth = 1;
 
-    std::vector<ShaderStage> m_stages;
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> m_groups;
-
-    std::vector<VkDynamicState> m_dynamic_state {};
+private:
+    uint32_t ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages);
 };

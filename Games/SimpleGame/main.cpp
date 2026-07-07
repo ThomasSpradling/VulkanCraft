@@ -1,5 +1,5 @@
 #include <iostream>
-#include "Example.h"
+#include "SimpleGame.h"
 // #include "Platform/Window/Window.h"
 
 #include <Engine/Client.h>
@@ -7,24 +7,26 @@
 #include <chrono>
 
 int main(int argc, char *argv[]) {
-    using namespace std::chrono_literals;
-
-    std::cout << "Hello, world: " << f() << "\n";
-
-    Window window = Window(WindowConfig {
-        .resolution = glm::vec2(800, 400),
-        .title = "Hello",
-        .fullscreen = false,
-    });
-
-    while (!window.ShouldClose()) {
-        glfwPollEvents();
+    try {
+        SimpleGame game{};
+        ClientApplication client_application(game, ClientEngineConfig{
+            .window_width = 1080,
+            .window_height = 720,
+            .window_title = "Simple Game",
+            .update_rate = 120,
+        });
         
-        std::cout << "X: " << window.GetFramebufferSize().x;
-        std::cout << ", Y: " << window.GetFramebufferSize().y;
-        std::cout << ", WAS_RESIZED: " << (window.WasResized() ? "TRUE" : "FALSE");
-        std::cout << ", ICON: " << (window.IsIconified() ? "TRUE" : "FALSE") << "\n";
+        client_application.Run();
 
-        std::this_thread::sleep_for(100ms);
+        return 0;
+    } catch (const std::runtime_error &error) {
+        std::cerr << "\033[31mRuntime Error: " << error.what() << "\033[0m\n";
+        return 1;
+    } catch (const std::exception &error) {
+        std::cerr << "\033[31mUnhandled Exception: " << error.what() << "\033[0m\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "\033[31mUnknown fatal exception\033[0m\n";
+        return 1;
     }
 }

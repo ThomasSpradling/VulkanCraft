@@ -11,7 +11,7 @@ target_include_directories(${GAME_NAME}_include INTERFACE
 #### Client ####
 
 add_library(${GAME_NAME}_client_lib STATIC
-    Example.cpp
+    SimpleGame.cpp
 )
 
 target_link_libraries(${GAME_NAME}_client_lib PUBLIC

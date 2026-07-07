@@ -9,7 +9,7 @@ target_link_libraries(platform_sockets PUBLIC
     engine_options
     engine_includes
     engine_definitions
-    
+
     glm
 )
 

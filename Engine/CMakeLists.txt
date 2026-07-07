@@ -11,13 +11,13 @@ target_compile_definitions(engine_definitions INTERFACE
 # -- VALIDATION LAYERS -- #
 
 option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" ON)
-option(ENGINE_ENABLE_GPU_ASSISTED "Enable GPU Assisted Feature" OFF)
 
 target_compile_definitions(engine_definitions INTERFACE
     ENGINE_ENABLE_VALIDATION_LAYERS=$<BOOL:${ENGINE_ENABLE_VALIDATION_LAYERS}>
     ENGINE_ENABLE_GPU_ASSISTED=$<BOOL:${ENGINE_ENABLE_GPU_ASSISTED}>
 )
 
+# -- SOURCES -- #
 
 add_subdirectory(Platform/Window)
 add_subdirectory(Platform/Graphics)

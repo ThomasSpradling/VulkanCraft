@@ -34,7 +34,7 @@ public:
     inline bool IsIconified() const { return m_window_iconified; };
 
     GLFWwindow *GetHandle() const { return m_window; }
-    glm::ivec2 GetFramebufferSize() const { return m_resolution; }
+    glm::uvec2 GetFramebufferSize() const { return m_resolution; }
 private:
     struct Button {
         bool pressed = false;

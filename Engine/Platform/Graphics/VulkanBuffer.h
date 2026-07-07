@@ -14,6 +14,7 @@ public:
     VulkanBufferBuilder &Size(VkDeviceSize size);
     VulkanBufferBuilder &AddUsage(VkBufferUsageFlags usage);
     VulkanBufferBuilder &AddMemoryFlags(VmaAllocationCreateFlags flag);
+    VulkanBufferBuilder &DebugName(const std::string &name);
     
     // For larger data to ensure that this memory has its own dedicated
     // memory block.
@@ -22,6 +23,8 @@ public:
     VulkanBufferBuilder &SharedQueueFamilies(std::span<uint32_t> queues);
     std::unique_ptr<VulkanBuffer> Build(const VulkanDevice &device);
 private:
+    std::string m_debug_name = "";
+
     VkDeviceSize m_size = 0ull;
     VkBufferUsageFlags m_usage = 0;
     VmaAllocationCreateFlags m_memory_flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
@@ -51,12 +54,12 @@ public:
     void Resize(VkDeviceSize size);
 
     void Upload(const void *data, VkDeviceSize bytes, VkDeviceSize offset = 0ull);
-private:
-    template <typename T>
-    void Upload(std::span<T> data, VkDeviceSize buffer_offset = 0) {
-        Upload(data.data(), data.size_bytes(), buffer_offset);
-    }
 
+    template <typename T>
+    void Upload(const std::vector<T> &data, VkDeviceSize buffer_offset = 0) {
+        Upload(data.data(), data.size() * sizeof(T), buffer_offset);
+    }
+    
     template <typename T>
     T *Mapped() {
         return static_cast<T *>(Mapped());

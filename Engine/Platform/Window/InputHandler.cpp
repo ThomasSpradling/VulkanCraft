@@ -5,7 +5,7 @@ InputHandler::InputHandler(Window &window)
     : m_window(window)
 {}
 
-void InputHandler::Update(float) {
+void InputHandler::Update() {
     // Pressing should last only until the end of the frame, independent of the state of button.down
 
     for (auto &button : m_window.m_keyboard.keys)

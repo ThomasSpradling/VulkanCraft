@@ -1,22 +1,3 @@
-add_library(engine_includes INTERFACE)
-target_include_directories(engine_includes INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-add_library(engine_definitions INTERFACE)
-target_compile_definitions(engine_definitions INTERFACE
-    ASSET_PATH="${CMAKE_SOURCE_DIR}/Assets"
-)
-
-# -- VALIDATION LAYERS -- #
-
-option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" ON)
-
-target_compile_definitions(engine_definitions INTERFACE
-    ENGINE_ENABLE_VALIDATION_LAYERS=$<BOOL:${ENGINE_ENABLE_VALIDATION_LAYERS}>
-    ENGINE_ENABLE_GPU_ASSISTED=$<BOOL:${ENGINE_ENABLE_GPU_ASSISTED}>
-)
-
 # -- SOURCES -- #
 
 add_subdirectory(Platform/Window)

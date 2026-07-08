@@ -91,6 +91,10 @@ VulkanBuffer::~VulkanBuffer() {
     vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
 }
 
+void VulkanBuffer::SetDebugName(std::string_view name) const {
+    m_device.SetDebugName(m_buffer, name);
+}
+
 VkDeviceAddress VulkanBuffer::DeviceAddress() const {
     VkBufferDeviceAddressInfo info {
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,

@@ -99,6 +99,7 @@ VulkanFence::~VulkanFence() {
 
 VulkanCommandPool::VulkanCommandPool(const VulkanDevice &device, QueueType queue, VkCommandPoolCreateFlags flags)
     : m_device(device)
+    , m_queue(queue)
 {
     VkCommandPoolCreateInfo create_info {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,

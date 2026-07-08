@@ -10,7 +10,7 @@
 
 VulkanSwapChain::VulkanSwapChain(const VulkanDevice &device, SwapChainConfig config)
     : m_device(device)
-    , m_config(std::move(config))
+    , m_config(config)
 {
     CreateSwapChain();
     CreateFrameData();
@@ -69,7 +69,7 @@ uint32_t VulkanSwapChain::GetImageCount() {
 }
 
 void VulkanSwapChain::Recreate(SwapChainConfig config) {
-    m_config = std::move(config);
+    m_config = config;
 
     DestroyFrameData();
     CreateSwapChain();
@@ -234,8 +234,6 @@ void VulkanSwapChain::DestroySwapChain() {
 }
 
 void VulkanSwapChain::CreateFrameData() {
-    // m_config.create_callback();
-
     //// Get Swapchain Images ////
     uint32_t image_count;
     VK_CHECK(vkGetSwapchainImagesKHR(m_device.Device(), m_swapchain, &image_count, nullptr));
@@ -253,10 +251,10 @@ void VulkanSwapChain::CreateFrameData() {
             m_image_properties.array_layers,
             m_image_properties.usage
         );
+        m_swapchain_images[i]->SetDebugName(std::format("SwapChain Image [{}]", i));
     }
 }
 
 void VulkanSwapChain::DestroyFrameData() {
-    // m_config.destroy_callback();
     m_swapchain_images.clear();
 }

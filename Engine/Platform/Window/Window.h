@@ -28,6 +28,8 @@ public:
     void DisableCursor() const;
     void EnableCursor() const;
 
+    void PollEvents() const { glfwPollEvents(); }
+
     void MakeFullscreen();
     void MakeWindowed();
     bool WasResized();

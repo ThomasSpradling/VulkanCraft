@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 constexpr uint32_t MaxMipmaps = std::numeric_limits<uint32_t>::max();
@@ -18,8 +19,8 @@ public:
     VulkanImageBuilder &Image2D(uint32_t width, uint32_t height);
     VulkanImageBuilder &Image3D(uint32_t width, uint32_t height, uint32_t depth);
     VulkanImageBuilder &Image2DArray(uint32_t width, uint32_t height, uint32_t layers);
-    VulkanImageBuilder &CubeMap(uint32_t face_width, uint32_t face_height);
-    VulkanImageBuilder &CubeMapArray(uint32_t face_width, uint32_t face_height, uint32_t layers);
+    VulkanImageBuilder &CubeMap(uint32_t side_length);
+    VulkanImageBuilder &CubeMapArray(uint32_t side_length, uint32_t layers);
 
     VulkanImageBuilder &DepthImage();
     VulkanImageBuilder &DepthStencilImage();
@@ -35,7 +36,7 @@ public:
     VulkanImageBuilder &LayersCount(uint32_t layers);
     VulkanImageBuilder &SampleCount(uint32_t sample_count);
 
-    VulkanImageBuilder &AddUsage(VkBufferUsageFlags usage);
+    VulkanImageBuilder &AddUsage(VkImageUsageFlags usage);
 
     // For larger data to ensure that this memory has its own dedicated
     // memory block.
@@ -55,7 +56,7 @@ private:
     uint32_t m_array_layers = 1;
     uint32_t m_mip_levels = 1;
 
-    VkSampleCountFlagBits m_sample_count = VK_SAMPLE_COUNT_1_BIT;
+    uint32_t m_sample_count = 1u;
 
     VkFormat m_format;
     VkImageLayout m_layout;
@@ -67,39 +68,6 @@ private:
 };
 
 class VulkanImage;
-class ImageBarrier {
-public:
-    ImageBarrier(VulkanImage &image);
-
-    // Selects a suitable access based on other parameters
-    ImageBarrier &SourceAccess(MemoryAccessType access);
-    ImageBarrier &DestAccess(MemoryAccessType access);
-    
-    ImageBarrier &SourceAccess(VkAccessFlags2 access);
-    ImageBarrier &DestAccess(VkAccessFlags2 access);
-
-    ImageBarrier &SourceStage(VkPipelineStageFlags2 stage);
-    ImageBarrier &DestStage(VkPipelineStageFlags2 stage);
-
-    ImageBarrier &TransitionLayout(VkImageLayout new_layout);
-    ImageBarrier &SubresourceRange(VkImageSubresourceRange subresource);
-
-    void Execute(VkCommandBuffer cmd);
-private:
-    VulkanImage &m_image;
-
-    MemoryAccessType m_generated_src_access = MemoryAccessType::ReadWrite;
-    MemoryAccessType m_generated_dst_access = MemoryAccessType::ReadWrite;
-
-    VkAccessFlags2 m_src_access = 0;
-    VkAccessFlags2 m_dst_access = 0;
-
-    VkPipelineStageFlags2 m_src_stage = 0;
-    VkPipelineStageFlags2 m_dst_stage = 0;
-
-    VkImageLayout m_new_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImageSubresourceRange m_subresource {};
-};
 
 class VulkanImage {
     friend VulkanImageBuilder;
@@ -110,28 +78,32 @@ public:
 
     // Creates a container for an externally-managed image (e.g. via a swapchain)
     static std::unique_ptr<VulkanImage> ExternalImage2D(const VulkanDevice &device, VkImage image, glm::ivec2 size, VkFormat format, uint32_t layers, VkImageUsageFlags usage);
-
     static inline VulkanImageBuilder ImageBuilder() { return VulkanImageBuilder(); }
+
+    void SetDebugName(std::string_view name) const;
 
     // Memory must be managed by caller. Any parameters left empty
     // will be filled with reasonable defaults.
     VkImageView CreateImageView();
     VkImageView CreateImageView(VkImageSubresourceRange subresource_range);
 
-    VkImageView View() { return m_image_view; }
+    VkImageView View() const { return m_image_view; }
 
     VkImage Image() const { return m_image; }
     VmaAllocation Allocation() const { return m_allocation; }
+
     VkExtent3D Extent() const { return m_extent; }
+    uint32_t ArrayLayers() const { return m_array_layers; }
+    uint32_t MipLevels() const { return m_mip_levels; }
+
     VkFormat Format() const { return m_format; }
     VkImageLayout Layout() const { return m_layout; }
+    uint32_t SampleCount() const { return m_sample_count; }
+
+    VkImageUsageFlags Usage() const { return m_usage; }
 
     void Upload(const void *data, VkDeviceSize bytes, VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED);
     void UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer, VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED);
-
-    void TransitionLayout(VkCommandBuffer cmd, VkImageLayout image_layout);
-    void TransitionLayout(VkCommandBuffer cmd, VkImageLayout image_layout, VkImageSubresourceRange range);
-    void GenerateMipMaps(VkCommandBuffer cmd, VkFilter filter = VK_FILTER_LINEAR);
 private:
     const VulkanDevice &m_device;
 private:
@@ -147,10 +119,10 @@ private:
     VkImageSubresourceRange m_full_subresource {};
 
     VkExtent3D m_extent {};
-    uint32_t m_array_layers = 1;
-    uint32_t m_mip_levels = 1;
+    uint32_t m_array_layers = 1u;
+    uint32_t m_mip_levels = 1u;
 
-    VkSampleCountFlagBits m_sample_count = VK_SAMPLE_COUNT_1_BIT;
+    uint32_t m_sample_count = 1u;
 
     VkFormat m_format = VK_FORMAT_UNDEFINED;
     VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;

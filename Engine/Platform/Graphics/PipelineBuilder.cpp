@@ -69,6 +69,7 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddShader(const CompiledShad
     m_shaders[shader.module_name] = shader;
 
     const auto fill_shader_entry = [&](std::optional<ShaderEntry> &entry, ShaderStage shader_stage) {
+        // Find first entry in this shader with this shader_stage
         const auto entries = shader.entry_points.find(shader_stage);
         if (entries == shader.entry_points.end())
             return;
@@ -674,6 +675,7 @@ uint32_t PipelineBuilder_RayTracing::ComputeShaderIndex(const ModuleEntry &entry
     if (!entry.is_valid)
         throw std::runtime_error("Invalid raytracing shader entry!");
 
+    // Check cache to see if this entry is already there
     for (uint32_t i = 0; i < m_shader_entries.size(); i++) {
         const ShaderEntry &shader_entry = m_shader_entries[i];
 
@@ -688,6 +690,7 @@ uint32_t PipelineBuilder_RayTracing::ComputeShaderIndex(const ModuleEntry &entry
             return i;
     }
 
+    // If not, grab the shader module and look for it there, adding an entry to the cache as necessary
     const auto shader = m_shaders.find(entry.module_name);
     if (shader == m_shaders.end())
         throw std::runtime_error("Shader module '" + entry.module_name + "' was not added to the raytracing pipeline!");

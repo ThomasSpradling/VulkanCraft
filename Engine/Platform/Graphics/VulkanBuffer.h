@@ -39,6 +39,8 @@ public:
 
     static inline VulkanBufferBuilder BufferBuilder() { return VulkanBufferBuilder(); }
 
+    void SetDebugName(std::string_view name) const;
+
     VkBuffer Buffer() const { return m_buffer; }
     VmaAllocation Allocation() const { return m_allocation; }
     VkDeviceSize Size() const { return m_size; }

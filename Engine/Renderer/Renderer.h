@@ -20,12 +20,14 @@ private:
         std::unique_ptr<VulkanCommandPool> command_pool;
         std::unique_ptr<CommandBuffer> command_buffer;
 
-        std::unique_ptr<VulkanFence> frame_complete_fence;
+        std::unique_ptr<VulkanFence> graphics_submit_fence;
         std::unique_ptr<VulkanSemaphore> image_available;
     };
     
     struct SwapChainContext {
         std::unique_ptr<VulkanSemaphore> render_finished;
+        std::unique_ptr<VulkanImage> draw_image;
+        // std::unique_ptr<VulkanImage> multisampled_image;
     };
 private:
     static constexpr uint32_t MaxFramesInFlight = 2;

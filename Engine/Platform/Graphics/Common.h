@@ -96,14 +96,16 @@ VkImageAspectFlags GetFormatAspect(VkFormat format);
  *
  * @note Should avoid using with VK_IMAGE_LAYOUT_GENERAL as this may be accessed via many ways.
  */
-VkAccessFlags2 GetAccessFlags(VkImageLayout image_layout, MemoryAccessType access = MemoryAccessType::ReadWrite);
+VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType access = MemoryAccessType::ReadWrite);
 
 /**
  * @return Gets the pipeline stages that an image of this layout is most likely to be processed during.
  * 
  * @note Should avoid using with VK_IMAGE_LAYOUT_GENERAL as this could have been used along any pipeline.
  */
-VkPipelineStageFlags2 GetPipelineStageFlags(VkImageLayout image_layout);
+VkPipelineStageFlags2 InferPipelineStageFlags(VkImageLayout image_layout);
+
+VkSampleCountFlagBits GetSampleCount(uint32_t sample_count);
 
 // ======================= //
 // ---- Shader Stages ---- //

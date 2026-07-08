@@ -11,6 +11,25 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_library(engine_options INTERFACE)
 target_compile_features(engine_options INTERFACE cxx_std_23)
 
+add_library(engine_includes INTERFACE)
+target_include_directories(engine_includes INTERFACE
+    ${CMAKE_SOURCE_DIR}/Engine
+)
+
+add_library(engine_definitions INTERFACE)
+target_compile_definitions(engine_definitions INTERFACE
+    ASSET_PATH="${CMAKE_SOURCE_DIR}/Assets"
+)
+
+# -- VALIDATION LAYERS -- #
+
+option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" ON)
+
+target_compile_definitions(engine_definitions INTERFACE
+    ENGINE_ENABLE_VALIDATION_LAYERS=$<BOOL:${ENGINE_ENABLE_VALIDATION_LAYERS}>
+    ENGINE_ENABLE_GPU_ASSISTED=$<BOOL:${ENGINE_ENABLE_GPU_ASSISTED}>
+)
+
 # -- WARNINGS AND ERRORS -- #
 
 option(ENGINE_WARNINGS_AS_ERRORS "Enable Warnings as Errors" ON)
@@ -77,7 +96,7 @@ endif()
 
 # -- ADDRESS SANITIZER -- #
 
-option(ENGINE_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" ON)
+option(ENGINE_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 
 if(ENGINE_ENABLE_ADDRESS_SANITIZER)
     message(STATUS "AddressSanitizer enabled")

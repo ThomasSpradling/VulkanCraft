@@ -191,7 +191,7 @@ VkImageAspectFlags GetFormatAspect(VkFormat format) {
     return VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
-VkAccessFlags2 GetAccessFlags(VkImageLayout image_layout, MemoryAccessType access) {
+VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType access) {
     bool read = static_cast<uint8_t>(access) & static_cast<uint8_t>(MemoryAccessType::Read);
     bool write = static_cast<uint8_t>(access) & static_cast<uint8_t>(MemoryAccessType::Write);
 
@@ -244,7 +244,7 @@ VkAccessFlags2 GetAccessFlags(VkImageLayout image_layout, MemoryAccessType acces
     return 0;
 }
 
-VkPipelineStageFlags2 GetPipelineStageFlags(VkImageLayout image_layout) {
+VkPipelineStageFlags2 InferPipelineStageFlags(VkImageLayout image_layout) {
     switch (image_layout) {
         case VK_IMAGE_LAYOUT_UNDEFINED:
             return VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
@@ -282,4 +282,26 @@ VkPipelineStageFlags2 GetPipelineStageFlags(VkImageLayout image_layout) {
             Assert(false, "Cannot define reasonable default for this image layout!");
     }
     return 0;
+}
+
+VkSampleCountFlagBits GetSampleCount(uint32_t sample_count) {
+    switch (sample_count) {
+        case 1:
+            return VK_SAMPLE_COUNT_1_BIT;
+        case 2:
+            return VK_SAMPLE_COUNT_2_BIT;
+        case 4:
+            return VK_SAMPLE_COUNT_4_BIT;
+        case 8:
+            return VK_SAMPLE_COUNT_8_BIT;
+        case 16:
+            return VK_SAMPLE_COUNT_16_BIT;
+        case 32:
+            return VK_SAMPLE_COUNT_32_BIT;
+        case 64:
+            return VK_SAMPLE_COUNT_64_BIT;
+        default:
+            Assert(false, "Invalid sample count for VulkanImage! It must be a power of two between 1 and 64.");
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
 }

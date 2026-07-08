@@ -39,6 +39,7 @@ ClientApplication::~ClientApplication() {
 
 void ClientApplication::Run() {
     using clock = std::chrono::steady_clock;
+    using namespace std::chrono_literals;
 
     auto previous_time = clock::now();
 
@@ -66,7 +67,7 @@ void ClientApplication::Run() {
         }
 
         const bool HAS_CAPPED_FPS = m_target_fps.has_value();
-        glfwPollEvents();
+        m_window->PollEvents();
 
         auto current_time = clock::now();
         std::chrono::duration<double, std::milli> delta_time = current_time - previous_time;
@@ -76,7 +77,12 @@ void ClientApplication::Run() {
 
         double frame_time = std::clamp(delta_time.count(), 0.0, MAX_FRAME_WAIT_TIME_MS);
         render_accum += frame_time;
-        fps_timer += frame_time;
+        fps_timer += delta_time.count();
+
+        if (m_window->IsIconified()) {
+            std::this_thread::sleep_for(50ms);
+            continue;
+        }
 
         while (update_accum >= UPDATE_STEP_TIME) {
             m_game.Update(UPDATE_STEP_TIME, context);

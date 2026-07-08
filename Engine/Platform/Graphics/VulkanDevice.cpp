@@ -388,11 +388,6 @@ void VulkanDevice::CreateVulkanDevice() {
 
     // Enabling Vulkan features
     std::vector<VkBaseOutStructure *> feature_chain;
-    // VkPhysicalDeviceFeatures feat10 = {
-    //     .geometryShader = VK_TRUE,
-    //     .sampleRateShading = VK_TRUE,
-    //     .multiDrawIndirect = VK_TRUE,
-    // };
 
     VkPhysicalDeviceVulkan11Features feat11 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
@@ -465,6 +460,7 @@ void VulkanDevice::CreateVulkanMemoryAllocator() {
         .device = m_device,
         .pVulkanFunctions = &vulkan_functions,
         .instance = m_instance,
+        .vulkanApiVersion = m_config.vulkan_version,
     };
     VK_CHECK(vmaCreateAllocator(&allocator_info, &m_allocator));
 }
@@ -645,6 +641,8 @@ std::vector<VkDeviceQueueCreateInfo> VulkanDevice::ChooseQueues() {
     Assert(present_family != invalid_family, "Must have a queue family that supports present!");
     Assert(transfer_family != invalid_family, "Must have a dedicated transfer queue family!");
     Assert(dedicated_compute_family != invalid_family, "Must have a dedicated compute queue family!");
+
+    Assert(graphics_compute_family == present_family, "Currently we only support present queues with graphics support!");
 
     m_graphics_queue.queue_family = graphics_compute_family;
     m_compute_queue.queue_family = graphics_compute_family;

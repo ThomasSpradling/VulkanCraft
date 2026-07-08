@@ -15,8 +15,6 @@ struct SwapChainConfig {
     uint32_t height;
 
     bool enable_vsync = false;
-    std::function<void(void)> create_callback;
-    std::function<void(void)> destroy_callback;
 };
 
 class VulkanSwapChain : public NonMovable, public NonCopyable {
@@ -25,6 +23,7 @@ public:
     ~VulkanSwapChain();
 
     VulkanImage &CurrentImage();
+    uint32_t CurrentImageIndex() const { return m_current_swapchain_image; }
     uint32_t GetImageCount();
 
     // Returns nullopt if it cannot be done successfully

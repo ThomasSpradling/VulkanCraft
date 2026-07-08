@@ -1,7 +1,114 @@
 #include "CommandBuffer.h"
+#include "Common.h"
 #include "VulkanObjects.h"
 #include "VulkanDevice.h"
 #include "VulkanImage.h"
+#include <stdexcept>
+
+// ============================== //
+// ---- Vulkan Image Builder ---- //
+// ============================== //
+
+ImageBarrier::ImageBarrier(VkCommandBuffer cmd, VulkanImage &image)
+    : m_image(image)
+    , m_cmd(cmd)
+{
+    m_new_layout = image.Layout();
+    m_subresource = VkImageSubresourceRange{
+        .baseMipLevel = 0,
+        .levelCount = image.m_mip_levels,
+        .baseArrayLayer = 0,
+        .layerCount = image.m_array_layers,
+    };
+    m_subresource.aspectMask = GetFormatAspect(image.Format());   
+}
+
+// Selects a suitable access based on other parameters
+ImageBarrier &ImageBarrier::SourceAccess(MemoryAccessType access) {
+    m_generated_src_access = access;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::DestAccess(MemoryAccessType access) {
+    m_generated_dst_access = access;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::SourceAccess(VkAccessFlags2 access) {
+    m_src_access |= access;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::DestAccess(VkAccessFlags2 access) {
+    m_dst_access |= access;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::SourceStage(VkPipelineStageFlags2 stage) {
+    m_src_stage |= stage;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::DestStage(VkPipelineStageFlags2 stage) {
+    m_dst_stage |= stage;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::TransitionLayout(VkImageLayout new_layout) {
+    Assert(new_layout != VK_IMAGE_LAYOUT_UNDEFINED, "An image cannot be transitioned into LAYOUT_UNDEFINED!");
+
+    m_new_layout = new_layout;
+    return *this;
+}
+
+ImageBarrier &ImageBarrier::SubresourceRange(const VkImageSubresourceRange &subresource) {
+    m_subresource = subresource;
+    return *this;
+}
+
+void ImageBarrier::Execute() {
+    const VkImageLayout old_layout = m_image.Layout();
+
+    if (m_src_stage == 0)
+        m_src_stage = InferPipelineStageFlags(old_layout);
+
+    if (m_dst_stage == 0)
+        m_dst_stage = InferPipelineStageFlags(m_new_layout);
+
+    if (m_src_access == 0)
+        m_src_access = InferAccessFlags(old_layout, m_generated_src_access);
+
+    if (m_dst_access == 0)
+        m_dst_access = InferAccessFlags(m_new_layout, m_generated_dst_access);
+
+    VkImageMemoryBarrier2 barrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = m_src_stage,
+        .srcAccessMask = m_src_access,
+        .dstStageMask = m_dst_stage,
+        .dstAccessMask = m_dst_access,
+        .oldLayout = old_layout,
+        .newLayout = m_new_layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = m_image.Image(),
+        .subresourceRange = m_subresource,
+    };
+
+    VkDependencyInfo dependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    };
+
+    vkCmdPipelineBarrier2(m_cmd, &dependency);
+
+    m_image.m_layout = m_new_layout;
+}
+
+// ======================== //
+// ---- Command Buffer ---- //
+// ======================== //
 
 CommandBuffer::CommandBuffer(const VulkanCommandPool &command_pool)
     : m_command_pool(command_pool)
@@ -31,43 +138,102 @@ void CommandBuffer::End() const {
     VK_CHECK(vkEndCommandBuffer(m_command_buffer));
 }
 
-void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout layout) const {
-    image.TransitionLayout(m_command_buffer, layout);
+void CommandBuffer::BeginRendering(const VulkanImage &color_image, glm::vec4 clear_color) const {
+    BeginRendering({
+        ImageAttachment{
+            .type = AttachmentType::Color,
+            .image = color_image,
+        },
+    }, clear_color);
 }
 
-void CommandBuffer::BeginRendering(VulkanImage &color_image, const VkClearValue &clear_value) const {
-    const VkExtent3D extent = color_image.Extent();
+void CommandBuffer::BeginRendering(const VulkanImage &color_image, const VulkanImage &depth_image, glm::vec4 clear_color, float clear_depth) const {
+    BeginRendering({
+        ImageAttachment{
+            .type = AttachmentType::Color,
+            .image = color_image,
+        },
+        ImageAttachment{
+            .type = AttachmentType::Depth,
+            .image = depth_image,
+        },
+    }, clear_color, clear_depth);
+}
 
-    VkRenderingAttachmentInfo color_attachment {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .pNext = nullptr,
-        .imageView = color_image.View(),
-        .imageLayout = color_image.Layout(),
-        .resolveMode = VK_RESOLVE_MODE_NONE,
-        .resolveImageView = VK_NULL_HANDLE,
-        .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = clear_value,
+void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets, glm::vec4 clear_color, float clear_depth, uint32_t clear_stencil) const {
+    if (render_targets.empty())
+        throw std::runtime_error("Cannot begin rendering without any render targets!");
+    
+    // Assume other render targets have same size. Not doing that leads to undefined behavior!
+    const VkExtent3D extent = render_targets[0].image.Extent();
+    VkRect2D render_area {
+        .offset = { .x = 0, .y = 0 },
+        .extent = {
+            .width = extent.width,
+            .height = extent.height,
+        },
     };
+    BeginRendering(render_targets, render_area, clear_color, clear_depth, clear_stencil);
+}
+
+void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area, glm::vec4 clear_color, float clear_depth, uint32_t clear_stencil) const {
+    if (render_targets.empty())
+        throw std::runtime_error("Cannot begin rendering without any render targets!");
+    
+    std::vector<VkRenderingAttachmentInfo> color_attachments {};
+    std::vector<VkRenderingAttachmentInfo> depth_attachments {};
+    std::vector<VkRenderingAttachmentInfo> stencil_attachments {};
+
+    for (const auto &attachment : render_targets) {
+        VkClearValue clear_value {};
+        if (attachment.type == AttachmentType::Depth || attachment.type == AttachmentType::Stencil) {
+            clear_value.depthStencil = {
+                .depth = clear_depth,
+                .stencil = clear_stencil,
+            };
+        } else if (attachment.type == AttachmentType::Color) {
+            clear_value.color = {
+                .float32 = { clear_color.x, clear_color.y, clear_color.z, clear_color.w },
+            };
+        }
+
+        VkRenderingAttachmentInfo attachment_info {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = attachment.image.View(),
+            .imageLayout = attachment.image.Layout(),
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = clear_value,
+        };
+
+        if (attachment.msaa && attachment.image.SampleCount() > 1u) {
+            if (attachment.resolve_image == nullptr)
+                throw std::runtime_error("Cannot resolve multisampled image with MSAA enabled to null image.");
+
+            attachment_info.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+            attachment_info.resolveImageLayout = attachment.resolve_image->Layout();
+            attachment_info.resolveImageView = attachment.resolve_image->View();
+        }
+
+        if (attachment.type == AttachmentType::Color)
+            color_attachments.push_back(attachment_info);
+        else if (attachment.type == AttachmentType::Depth)
+            depth_attachments.push_back(attachment_info);
+        else if (attachment.type == AttachmentType::Stencil)
+            stencil_attachments.push_back(attachment_info);
+    }
 
     VkRenderingInfo rendering_info {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .renderArea = {
-            .offset = { .x = 0, .y = 0 },
-            .extent = {
-                .width = extent.width,
-                .height = extent.height,
-            },
-        },
+        .renderArea = render_area,
         .layerCount = 1,
         .viewMask = 0,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment,
-        .pDepthAttachment = nullptr,
-        .pStencilAttachment = nullptr,
+        .colorAttachmentCount = static_cast<uint32_t>(color_attachments.size()),
+        .pColorAttachments = color_attachments.data(),
+        .pDepthAttachment = depth_attachments.empty() ? nullptr : &depth_attachments[0],
+        .pStencilAttachment = stencil_attachments.empty() ? nullptr : &stencil_attachments[0],
     };
 
     vkCmdBeginRendering(m_command_buffer, &rendering_info);
@@ -81,29 +247,205 @@ void CommandBuffer::BindGraphicsPipeline(VkPipeline pipeline) const {
     vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 }
 
-void CommandBuffer::SetViewportAndScissor(VkExtent2D extent) const {
+void CommandBuffer::BindComputePipeline(VkPipeline pipeline) const {
+    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+}
+
+
+void CommandBuffer::BindRayTracingPipeline(VkPipeline pipeline) const {
+    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
+}
+
+void CommandBuffer::SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const {
     VkViewport viewport {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = static_cast<float>(extent.width),
-        .height = static_cast<float>(extent.height),
+        .x = static_cast<float>(offset.x),
+        .y = static_cast<float>(offset.y),
+        .width = static_cast<float>(extent.x),
+        .height = static_cast<float>(extent.y),
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
 
     VkRect2D scissor {
         .offset = { .x = 0, .y = 0 },
-        .extent = extent,
+        .extent = { .width = extent.x, .height = extent.y },
     };
 
     vkCmdSetViewport(m_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(m_command_buffer, 0, 1, &scissor);
 }
 
-void CommandBuffer::Draw(uint32_t vertex_count, uint32_t instance_count,uint32_t first_vertex, uint32_t first_instance) const {
+void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) {
+    Assert(src.Extent().width == dst.Extent().width
+        && src.Extent().height == dst.Extent().height
+        && src.Extent().depth == dst.Extent().depth, "Cannot copy images of different extents!");
+    VkImageCopy region {
+        .srcSubresource = {
+            .aspectMask = GetFormatAspect(src.Format()),
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = src.ArrayLayers(),
+        },
+        .srcOffset = VkOffset3D{},
+        .dstSubresource = {
+            .aspectMask = GetFormatAspect(src.Format()),
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = dst.ArrayLayers(),
+        },
+        .dstOffset = VkOffset3D{},
+        .extent = src.Extent(),
+    };
+    vkCmdCopyImage(m_command_buffer, src.Image(), src.Layout(), dst.Image(), dst.Layout(), 1, &region);
+}
+
+void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) {
+    if (!m_command_pool.m_device.EnabledValidations())
+        return;
+
+    VkDebugUtilsLabelEXT label_info {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = label.c_str(),
+        .color = {
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+        },
+    };
+    vkCmdBeginDebugUtilsLabelEXT(m_command_buffer, &label_info);
+}
+
+void CommandBuffer::EndLabel() {
+    if (!m_command_pool.m_device.EnabledValidations())
+        return;
+
+    vkCmdEndDebugUtilsLabelEXT(m_command_buffer);
+}
+
+void CommandBuffer::InsertLabel(const std::string &label, glm::vec4 color) {
+    if (!m_command_pool.m_device.EnabledValidations())
+        return;
+
+    VkDebugUtilsLabelEXT label_info {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = label.c_str(),
+        .color = {
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+        },
+    };
+    vkCmdInsertDebugUtilsLabelEXT(m_command_buffer, &label_info);
+}
+
+void CommandBuffer::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance) const {
     vkCmdDraw(m_command_buffer, vertex_count, instance_count, first_vertex, first_instance);
 }
 
 void CommandBuffer::SetDebugName(std::string_view name) const {
     m_command_pool.m_device.SetDebugName(m_command_buffer, name);
+}
+
+void GenerateMipMaps(VulkanImage &image, VkFilter filter) {
+    
+}
+
+
+ImageBarrier CommandBuffer::ImageMemoryBarrier(VulkanImage &image) const {
+    return ImageBarrier(m_command_buffer, image);
+}
+
+void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout image_layout) const {
+    ImageMemoryBarrier(image)
+        .TransitionLayout(image_layout)
+        .Execute();
+}
+
+void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout image_layout, const VkImageSubresourceRange &range) const {
+    ImageMemoryBarrier(image)
+        .TransitionLayout(image_layout)
+        .SubresourceRange(range)
+        .Execute();
+}
+
+void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer) {
+    Assert(image.SampleCount() == 1u, "Cannot generate mipmaps for multi-sampled image!");
+    Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
+    
+    const VkImageLayout old_layout = image.Layout();
+    const VkExtent3D &extent = image.Extent();
+    const VkImageAspectFlags aspect = GetFormatAspect(image.Format());
+
+    for (uint32_t level = 1; level < image.MipLevels(); ++level) {
+        // Transition previous level to TRANSFER_SRC and current level to TRANSFER_DST
+        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VkImageSubresourceRange {
+            .aspectMask = aspect,
+            .baseMipLevel = level - 1,
+            .levelCount = 1,
+            .baseArrayLayer = layer,
+            .layerCount = 1,
+        });
+
+        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageSubresourceRange {
+            .aspectMask = aspect,
+            .baseMipLevel = level,
+            .levelCount = 1,
+            .baseArrayLayer = layer,
+            .layerCount = 1,
+        });
+
+        // Layer L will have dimensions floor(W / 2^L) by floor(H / 2^L) where W and H were
+        // the base layer's Width and Height, respectively
+        VkImageBlit2 blit_region {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+            .srcSubresource = {
+                .aspectMask = aspect,
+                .mipLevel = level - 1,
+                .baseArrayLayer = layer,
+                .layerCount = 1,
+            },
+            .srcOffsets = {
+                VkOffset3D { .x = 0, .y = 0, .z = 0 },
+                VkOffset3D {
+                    .x = static_cast<int32_t>(extent.width) >> (level - 1),
+                    .y = static_cast<int32_t>(extent.height) >> (level - 1),
+                    .z = 1
+                }
+            },
+            .dstSubresource = {
+                .aspectMask = aspect,
+                .mipLevel = level,
+                .baseArrayLayer = layer,
+                .layerCount = 1,
+            },
+            .dstOffsets = {
+                VkOffset3D { .x = 0, .y = 0, .z = 0 },
+                VkOffset3D {
+                    .x = static_cast<int32_t>(extent.width) >> level,
+                    .y = static_cast<int32_t>(extent.height) >> level,
+                    .z = 1
+                },
+            },
+        };
+        
+        VkBlitImageInfo2 blit_image_info {
+            .sType   = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+            .srcImage = image.Image(),
+            .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .dstImage = image.Image(),
+            .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .regionCount = 1,
+            .pRegions = &blit_region,
+            .filter = filter,
+        };
+        vkCmdBlitImage2(m_command_buffer, &blit_image_info);
+    }
+    
+    TransitionLayout(image, old_layout, VkImageSubresourceRange {
+        .aspectMask = aspect,
+        .baseArrayLayer = layer,
+        .layerCount = 1,
+    });
 }

@@ -52,6 +52,8 @@ public:
     VkSurfaceKHR Surface() const { return m_surface; }
     VmaAllocator Allocator() const { return m_allocator; }
 
+    bool EnabledValidations() const { return m_config.enable_validation; }
+
     VkQueue Queue(QueueType type) const;
     uint32_t QueueFamily(QueueType type) const;
 
@@ -70,31 +72,33 @@ public:
 public:
     template<typename T>
     void SetDebugName(T object, std::string_view name) const {
-        constexpr VkObjectType object_type = ObjectType<T>();
-
-        if constexpr (object_type == VK_OBJECT_TYPE_UNKNOWN)
-            return;
-
-        if (object == VK_NULL_HANDLE)
-            return;
-
-        uint64_t object_handle = 0;
-        if constexpr (std::is_pointer_v<T>) {
-            object_handle = reinterpret_cast<uint64_t>(object);
-        } else {
-            object_handle = static_cast<uint64_t>(object);
+        if (m_config.enable_validation) {
+            constexpr VkObjectType object_type = ObjectType<T>();
+    
+            if constexpr (object_type == VK_OBJECT_TYPE_UNKNOWN)
+                return;
+    
+            if (object == VK_NULL_HANDLE)
+                return;
+    
+            uint64_t object_handle = 0;
+            if constexpr (std::is_pointer_v<T>) {
+                object_handle = reinterpret_cast<uint64_t>(object);
+            } else {
+                object_handle = static_cast<uint64_t>(object);
+            }
+    
+            std::string debug_name(name);
+    
+            VkDebugUtilsObjectNameInfoEXT debug_name_info {
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                .objectType = object_type,
+                .objectHandle = object_handle,
+                .pObjectName = debug_name.data(),
+            };
+    
+            VK_CHECK(vkSetDebugUtilsObjectNameEXT(m_device, &debug_name_info));
         }
-
-        std::string debug_name(name);
-
-        VkDebugUtilsObjectNameInfoEXT debug_name_info {
-            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-            .objectType = object_type,
-            .objectHandle = object_handle,
-            .pObjectName = debug_name.data(),
-        };
-
-        VK_CHECK(vkSetDebugUtilsObjectNameEXT(m_device, &debug_name_info));
     }
 
 private:
@@ -112,7 +116,7 @@ private:
         VkFence fence = VK_NULL_HANDLE;
     };
 private:
-    DeviceConfig m_config {};
+    const DeviceConfig m_config {};
 
     VkInstance m_instance = VK_NULL_HANDLE;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;

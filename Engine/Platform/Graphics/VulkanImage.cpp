@@ -15,7 +15,7 @@ VulkanImageBuilder &VulkanImageBuilder::Image2D(uint32_t width, uint32_t height)
     m_extent = VkExtent3D{
         .width = width,
         .height = height,
-        .depth = 0,
+        .depth = 1,
     };
     return *this;
 }
@@ -37,33 +37,34 @@ VulkanImageBuilder &VulkanImageBuilder::Image2DArray(uint32_t width, uint32_t he
     m_extent = VkExtent3D{
         .width = width,
         .height = height,
-        .depth = 0,
+        .depth = 1,
     };
     m_array_layers = layers;
     return *this;
 }
 
-VulkanImageBuilder &VulkanImageBuilder::CubeMap(uint32_t face_width, uint32_t face_height) {
+VulkanImageBuilder &VulkanImageBuilder::CubeMap(uint32_t side_length) {
     m_type = VK_IMAGE_TYPE_2D;
     m_view_type = VK_IMAGE_VIEW_TYPE_CUBE;
     m_extent = VkExtent3D{
-        .width = face_width,
-        .height = face_height,
-        .depth = 0,
+        .width = side_length,
+        .height = side_length,
+        .depth = 1,
     };
+    m_array_layers = 6;
     m_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     return *this;
 }
 
-VulkanImageBuilder &VulkanImageBuilder::CubeMapArray(uint32_t face_width, uint32_t face_height, uint32_t layers) {
+VulkanImageBuilder &VulkanImageBuilder::CubeMapArray(uint32_t side_length, uint32_t layers) {
     m_type = VK_IMAGE_TYPE_2D;
     m_view_type = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
     m_extent = VkExtent3D{
-        .width = face_width,
-        .height = face_height,
-        .depth = 0,
+        .width = side_length,
+        .height = side_length,
+        .depth = 1,
     };
-    m_array_layers = layers;
+    m_array_layers = layers * 6;
     m_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     return *this;
 }
@@ -78,37 +79,12 @@ VulkanImageBuilder &VulkanImageBuilder::MipMapLevels(uint32_t levels) {
 }
 
 VulkanImageBuilder &VulkanImageBuilder::SampleCount(uint32_t sample_count) {
-    switch (sample_count) {
-        case 1:
-            m_sample_count = VK_SAMPLE_COUNT_1_BIT;
-            break;
-        case 2:
-            m_sample_count = VK_SAMPLE_COUNT_2_BIT;
-            break;
-        case 4:
-            m_sample_count = VK_SAMPLE_COUNT_4_BIT;
-            break;
-        case 8:
-            m_sample_count = VK_SAMPLE_COUNT_8_BIT;
-            break;
-        case 16:
-            m_sample_count = VK_SAMPLE_COUNT_16_BIT;
-            break;
-        case 32:
-            m_sample_count = VK_SAMPLE_COUNT_32_BIT;
-            break;
-        case 64:
-            m_sample_count = VK_SAMPLE_COUNT_64_BIT;
-            break;
-        default:
-            Assert(false, "Invalid sample count for VulkanImage! It must be a power of two between 1 and 64.");
-    }
-
+    m_sample_count = sample_count;
     return *this;
 }
 
-VulkanImageBuilder &VulkanImageBuilder::AddUsage(VkBufferUsageFlags usage) {
-    m_usage = usage;
+VulkanImageBuilder &VulkanImageBuilder::AddUsage(VkImageUsageFlags usage) {
+    m_usage |= usage;
     return *this;
 }
 
@@ -147,7 +123,7 @@ std::unique_ptr<VulkanImage> VulkanImageBuilder::Build(const VulkanDevice &devic
         .extent = m_extent,
         .mipLevels = m_mip_levels,
         .arrayLayers = m_array_layers,
-        .samples = m_sample_count,
+        .samples = GetSampleCount(m_sample_count),
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = m_usage,
         .sharingMode = sharing_mode,
@@ -203,104 +179,6 @@ std::unique_ptr<VulkanImage> VulkanImageBuilder::Build(const VulkanDevice &devic
     return vk_image;
 }
 
-// ============================== //
-// ---- Vulkan Image Builder ---- //
-// ============================== //
-
-ImageBarrier::ImageBarrier(VulkanImage &image)
-    : m_image(image)
-{
-    m_new_layout = image.Layout();
-    m_subresource = VkImageSubresourceRange{
-        .baseMipLevel = 0,
-        .levelCount = image.m_mip_levels,
-        .baseArrayLayer = 0,
-        .layerCount = image.m_array_layers,
-    };
-    m_subresource.aspectMask = GetFormatAspect(image.Format());   
-}
-
-// Selects a suitable access based on other parameters
-ImageBarrier &ImageBarrier::SourceAccess(MemoryAccessType access) {
-    m_generated_src_access = access;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::DestAccess(MemoryAccessType access) {
-    m_generated_dst_access = access;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::SourceAccess(VkAccessFlags2 access) {
-    m_src_access |= access;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::DestAccess(VkAccessFlags2 access) {
-    m_dst_access |= m_dst_access;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::SourceStage(VkPipelineStageFlags2 stage) {
-    m_src_stage |= stage;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::DestStage(VkPipelineStageFlags2 stage) {
-    m_dst_stage |= stage;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::TransitionLayout(VkImageLayout new_layout) {
-    Assert(new_layout != VK_IMAGE_LAYOUT_UNDEFINED, "An image cannot be transitioned into LAYOUT_UNDEFINED!");
-
-    m_new_layout = new_layout;
-    return *this;
-}
-
-ImageBarrier &ImageBarrier::SubresourceRange(VkImageSubresourceRange subresource) {
-    m_subresource = subresource;
-    return *this;
-}
-
-void ImageBarrier::Execute(VkCommandBuffer cmd) {
-    if (m_src_stage == 0)
-        m_src_stage = GetPipelineStageFlags(m_image.Layout());
-
-    if (m_dst_stage == 0)
-        m_dst_stage = GetPipelineStageFlags(m_new_layout);
-
-    if (m_src_access == 0)
-        m_src_access = GetAccessFlags(m_image.Layout(), m_generated_src_access);
-
-    if (m_dst_access == 0)
-        m_dst_access = GetAccessFlags(m_new_layout, m_generated_dst_access);
-
-    VkImageMemoryBarrier2 barrier {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = m_src_stage,
-        .srcAccessMask = m_src_access,
-        .dstStageMask = m_dst_stage,
-        .dstAccessMask = m_dst_access,
-        .image = m_image.Image(),
-        .subresourceRange = m_subresource,
-    };
-    
-    if (m_new_layout != VK_IMAGE_LAYOUT_UNDEFINED && m_new_layout != m_image.m_layout) {
-        barrier.oldLayout = m_image.Layout();
-        barrier.newLayout = m_new_layout;
-        m_image.m_layout = m_new_layout;
-    }
-
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .dependencyFlags = 0,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier,
-    };
-    vkCmdPipelineBarrier2(cmd, &dependency);
-}
-
 // ====================== //
 // ---- Vulkan Image ---- //
 // ====================== //
@@ -310,12 +188,12 @@ VulkanImage::VulkanImage(const VulkanDevice &device)
 {}
 
 VulkanImage::~VulkanImage() {
-    if (m_image != VK_NULL_HANDLE && m_allocation != nullptr) {
-        vmaDestroyImage(m_device.Allocator(), m_image, m_allocation);
-    }
-
     if (m_image_view != VK_NULL_HANDLE) {
         vkDestroyImageView(m_device.Device(), m_image_view, nullptr);
+    }
+
+    if (m_image != VK_NULL_HANDLE && m_allocation != nullptr) {
+        vmaDestroyImage(m_device.Allocator(), m_image, m_allocation);
     }
 }
 
@@ -325,12 +203,22 @@ std::unique_ptr<VulkanImage> VulkanImage::ExternalImage2D(const VulkanDevice &de
     result->m_extent = {
         .width = static_cast<uint32_t>(size.x),
         .height = static_cast<uint32_t>(size.y),
+        .depth = 1,
     };
     result->m_format = format;
     result->m_array_layers = layers;
     result->m_usage = usage;
     result->m_image_view = result->CreateImageView();
     return result;
+}
+
+void VulkanImage::SetDebugName(std::string_view name) const {
+    m_device.SetDebugName(m_image, name);
+
+    if (m_image_view) {
+        std::string view_debug_name = std::string(name) + " View";
+        m_device.SetDebugName(m_image_view, view_debug_name);
+    }
 }
 
 VkImageView VulkanImage::CreateImageView() {
@@ -380,91 +268,6 @@ void VulkanImage::UploadLayer(const void *data, VkDeviceSize bytes, uint32_t lay
     UploadLayers(data, bytes, layer, 1, image_layout);
 }
 
-void VulkanImage::TransitionLayout(VkCommandBuffer cmd, VkImageLayout image_layout) {
-    ImageBarrier(*this)
-        .TransitionLayout(image_layout)
-        .Execute(cmd);
-}
-
-void VulkanImage::TransitionLayout(VkCommandBuffer cmd, VkImageLayout image_layout, VkImageSubresourceRange range) {
-    ImageBarrier(*this)
-        .TransitionLayout(image_layout)
-        .SubresourceRange(range)
-        .Execute(cmd);
-}
-
-void VulkanImage::GenerateMipMaps(VkCommandBuffer cmd, VkFilter filter) {
-    Assert(m_sample_count == VK_SAMPLE_COUNT_1_BIT, "Cannot generate mipmaps for multi-sampled image!");
-    Assert(m_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
-    for (uint32_t layer = 0; layer < m_array_layers; ++layer) {
-        for (uint32_t level = 1; level < m_mip_levels; ++level) {
-            // Transition previous level to TRANSFER_SRC and current level to TRANSFER_DST
-            TransitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VkImageSubresourceRange{
-                .aspectMask = GetFormatAspect(m_format),
-                .baseMipLevel = level - 1,
-                .levelCount = 1,
-                .baseArrayLayer = layer,
-                .layerCount = 1,
-            });
-
-            TransitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageSubresourceRange{
-                .aspectMask = GetFormatAspect(m_format),
-                .baseMipLevel = level,
-                .levelCount = 1,
-                .baseArrayLayer = layer,
-                .layerCount = 1,
-            });
-
-            // Layer L will have dimensions floor(W / 2^L) by floor(H / 2^L) where W and H were
-            // the base layer's Width and Height, respectively
-            VkImageBlit2 blit_region {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
-                .srcSubresource = {
-                    .aspectMask = GetFormatAspect(m_format),
-                    .mipLevel = level - 1,
-                    .baseArrayLayer = layer,
-                    .layerCount = 1,
-                },
-                .srcOffsets = {
-                    VkOffset3D { .x = 0, .y = 0, .z = 0 },
-                    VkOffset3D {
-                        .x = static_cast<int32_t>(m_extent.width) >> (level - 1),
-                        .y = static_cast<int32_t>(m_extent.height) >> (level - 1),
-                        .z = 1
-                    }
-                },
-                .dstSubresource = {
-                    .aspectMask = GetFormatAspect(m_format),
-                    .mipLevel = level,
-                    .baseArrayLayer = layer,
-                    .layerCount = 1,
-                },
-                .dstOffsets = {
-                    VkOffset3D { .x = 0, .y = 0, .z = 0 },
-                    VkOffset3D {
-                        .x = static_cast<int32_t>(m_extent.width) >> level,
-                        .y = static_cast<int32_t>(m_extent.height) >> level,
-                        .z = 1
-                    },
-                },
-            };
-            
-            VkBlitImageInfo2 blit_image_info {
-                .sType   = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-                .srcImage = m_image,
-                .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .dstImage = m_image,
-                .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .regionCount = 1,
-                .pRegions = &blit_region,
-                .filter = filter,
-            };
-            vkCmdBlitImage2(cmd, &blit_image_info);
-        }
-    }
-    TransitionLayout(cmd, m_layout);
-}
-
 void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count, VkImageLayout image_layout) {
     VkDeviceSize source_bytes = GetBytesPerPixel(m_format) * m_extent.width * m_extent.height * m_extent.depth * layer_count;
     Assert(bytes == source_bytes, std::format("Non-matching sizes! Source data was {} bytes, but target data was"
@@ -476,7 +279,7 @@ void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t la
         image_layout = m_layout;
 
     auto staging_buffer = VulkanBuffer::BufferBuilder()
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+        .AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
         .Build(m_device);

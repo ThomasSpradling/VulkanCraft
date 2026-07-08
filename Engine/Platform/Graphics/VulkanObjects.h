@@ -67,5 +67,6 @@ public:
     void SetDebugName(std::string_view name) const;
 private:
     const VulkanDevice &m_device;
+    QueueType m_queue;
     VkCommandPool m_command_pool = VK_NULL_HANDLE;
 };

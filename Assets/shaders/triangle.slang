@@ -12,7 +12,7 @@ static float3 colors[3] = float3[](
 
 struct VertexOutput {
     float4 v_position : SV_Position;
-    float4 color;
+    float4 color : TEXCOORD0;
 };
 
 [shader("vertex")]

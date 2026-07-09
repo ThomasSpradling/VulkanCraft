@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/Graphics/Common.h"
+#include "VulkanPipeline.h"
 #include <glm/glm.hpp>
 #include <string_view>
 #include <variant>
@@ -85,15 +86,13 @@ public:
     void BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area) const;
     void EndRendering() const;
 
-    void BindGraphicsPipeline(VkPipeline pipeline) const;
-    void BindComputePipeline(VkPipeline pipeline) const;
-    void BindRayTracingPipeline(VkPipeline pipeline) const;
+    void BindPipeline(const VulkanPipeline &pipeline) const;
 
     void SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const;
 
     void CopyImage(const VulkanImage &src, const VulkanImage &dst);
 
-    void BindDescriptorSet(VkPipelineBindPoint bind_point, uint32_t set, VkPipelineLayout layout, VkDescriptorSet descriptor_set);
+    void BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set);
     
     template<typename T>
     void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, uint32_t offset, uint32_t size, const T &data) {

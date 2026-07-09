@@ -12,7 +12,6 @@
 #include "ShaderCompiler.h"
 #include "VulkanDevice.h"
 #include "VulkanObjects.h"
-// #include "VulkanRenderer.h"
 
 struct ShaderEntry {
     std::string module_name;
@@ -20,12 +19,25 @@ struct ShaderEntry {
     ShaderStage shader_stage;
 };
 
+enum class BlendMode : uint8_t {
+    Disabled,
+    Alpha,
+    Premultiplied,
+    Additive,
+};
+
+struct ColorAttachment {
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    BlendMode blending_mode = BlendMode::Disabled;
+};
+
+class VulkanPipeline;
 class PipelineBuilder_Graphics {
 public:
-    PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_Graphics(const VulkanDevice &device);
     
     PipelineBuilder_Graphics &AddBinding(uint32_t binding, uint32_t stride, VkVertexInputRate input_rate = VK_VERTEX_INPUT_RATE_VERTEX);
-    PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset = 0);
+    PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, DataFormat format, uint32_t offset = 0);
 
     PipelineBuilder_Graphics &FromBase(VkPipeline base_pipeline);
 
@@ -60,43 +72,17 @@ public:
     PipelineBuilder_Graphics &Enable8xMSAA(float min_sample_shading = 1.0f);
     PipelineBuilder_Graphics &EnableAlphaToCoverageMSAA();
 
-    /** @brief Enabled opaque blending state by disabling blending. */
-    PipelineBuilder_Graphics &DisableBlending();
-
-    /**
-        * @brief Enables alpha blending with expression:
-        *      out_color = src_alpha * src_color + (1 - src_alpha) * dst_color
-        *      out_alpha = src_alpha
-        */
-    PipelineBuilder_Graphics &EnableBlendingAlpha();
-
-    /**
-        * @brief Enables pre-multiplied alpha blending with expression:
-        *      out_color = src_color + (1 - src_alpha) * dst_color
-        *      out_alpha = src_alpha
-        */
-    PipelineBuilder_Graphics &EnableBlendingPremultipliedAlpha();
-
-    /**
-        * @brief Enables additive blending with expression:
-        *      out_color = src_color + dst_color
-        *      out_alpha = src_alpha + dst_alpha
-        */
-    PipelineBuilder_Graphics &EnableBlendingAdditive();
-
-    PipelineBuilder_Graphics &EnableBlending(VkBlendFactor src_color_blend_factor, VkBlendFactor dst_color_blend_factor, VkBlendOp color_blend_op, VkBlendFactor src_alpha_blend_factor, VkBlendFactor dst_alpha_blend_factor, VkBlendOp alpha_blend_op);    
-    
-    PipelineBuilder_Graphics &ClearDynamicState();
-    PipelineBuilder_Graphics &AddDynamicState(VkDynamicState dynamic_state);
-
-    PipelineBuilder_Graphics &SetLayout(VkPipelineLayout pipeline_layout);
-
-    PipelineBuilder_Graphics &AddColorAttachmentFormat(VkFormat format);
+    PipelineBuilder_Graphics &AddColorAttachment(ColorAttachment attachment);
     PipelineBuilder_Graphics &SetDepthStencilAttachmentFormat(VkFormat format);
     PipelineBuilder_Graphics &SetDepthAttachmentFormat(VkFormat format);
     PipelineBuilder_Graphics &SetStencilAttachmentFormat(VkFormat format);
+
+    PipelineBuilder_Graphics &AddDynamicState(VkDynamicState dynamic_state);
     
-    VkPipeline Build();
+    PipelineBuilder_Graphics &AddPushConstant(const VkPushConstantRange &range);
+    PipelineBuilder_Graphics &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
+
+    std::unique_ptr<VulkanPipeline> Build();
 private:
     const VulkanDevice &m_device;
 
@@ -141,25 +127,16 @@ private:
         VkBool32 depth_test_enabled = VK_FALSE;
         VkBool32 depth_write_enabled = VK_FALSE;
         VkCompareOp depth_compare = VK_COMPARE_OP_NEVER;
+        VkFormat depth_format = VK_FORMAT_UNDEFINED;
     } m_depth_state;
 
     struct StencilState {
         VkBool32 stencil_test_enabled = VK_FALSE;
+        VkFormat stencil_format = VK_FORMAT_UNDEFINED;
     } m_stencil_state;
 
-    struct ColorBlendState {
-        VkBool32 blend_enable = VK_FALSE;
-        VkBlendFactor src_color_blend_factor = VK_BLEND_FACTOR_ZERO;
-        VkBlendFactor dst_color_blend_factor = VK_BLEND_FACTOR_ZERO;
-        VkBlendOp color_blend_op = VK_BLEND_OP_ADD;
-        VkBlendFactor src_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-        VkBlendFactor dst_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-        VkBlendOp alpha_blend_op = VK_BLEND_OP_ADD;
-        VkColorComponentFlags color_write_mask = VK_COLOR_COMPONENT_R_BIT
-                                                | VK_COLOR_COMPONENT_G_BIT
-                                                | VK_COLOR_COMPONENT_B_BIT
-                                                | VK_COLOR_COMPONENT_A_BIT;
-    } m_color_blend_state;
+    std::vector<VkFormat> m_attachment_color_formats;
+    std::vector<VkPipelineColorBlendAttachmentState> m_attachment_blend_state;
 
     std::vector<VkDynamicState> m_dynamic_state {
         VK_DYNAMIC_STATE_VIEWPORT,
@@ -172,26 +149,32 @@ private:
         VkFormat stencil_format = VK_FORMAT_UNDEFINED;
     } m_attachment_formats;
 
+    std::vector<VkPushConstantRange> m_push_constants;
+    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
+
     VkPipeline m_base_pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
 private:
     PipelineBuilder_Graphics &EmplaceShader(ShaderStage stage, std::optional<ShaderEntry> &out_entry, const CompiledShader &shader, const std::string &entry);
 };
 
 class PipelineBuilder_Compute {
 public:
-    PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_Compute(const VulkanDevice &device);
 
     PipelineBuilder_Compute &SetShader(const CompiledShader &shader, const std::string &entry_name = "");
 
-    VkPipeline Build();
+    PipelineBuilder_Compute &AddPushConstant(const VkPushConstantRange &range);
+    PipelineBuilder_Compute &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
+
+    std::unique_ptr<VulkanPipeline> Build();
 private:
     const VulkanDevice &m_device;
 
     CompiledShader m_shader;
     ShaderEntry m_compute_shader;
 
-    VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
+    std::vector<VkPushConstantRange> m_push_constants;
+    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
 };
 
 struct ModuleEntry {
@@ -211,7 +194,7 @@ struct ModuleEntry {
 
 class PipelineBuilder_RayTracing {
 public:
-    PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout = VK_NULL_HANDLE);
+    PipelineBuilder_RayTracing(const VulkanDevice &device);
 
     PipelineBuilder_RayTracing &AddShader(const CompiledShader &shader);
 
@@ -219,16 +202,17 @@ public:
     PipelineBuilder_RayTracing &AddTriangleHitGroup(const ModuleEntry &chit_shader = nullptr, const ModuleEntry &ahit_shader = nullptr);
     PipelineBuilder_RayTracing &AddProceduralHitGroup(const ModuleEntry &intersection_shader, const ModuleEntry &chit_shader = nullptr, const ModuleEntry &ahit_shader = nullptr);
 
-    PipelineBuilder_RayTracing &SetLayout(VkPipelineLayout pipeline_layout);
     PipelineBuilder_RayTracing &SetMaxRayRecursionDepth(uint32_t value = 1);
 
     PipelineBuilder_RayTracing &ClearDynamicState();
     PipelineBuilder_RayTracing &AddDynamicState(VkDynamicState dynamic_state);
 
     const std::vector<VkRayTracingShaderGroupCreateInfoKHR> &GetGroups() const { return m_groups; }
+    
+    PipelineBuilder_RayTracing &AddPushConstant(const VkPushConstantRange &range);
+    PipelineBuilder_RayTracing &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
 
-    VkPipeline Build();
-
+    std::unique_ptr<VulkanPipeline> Build();
 private:
     const VulkanDevice &m_device;
 
@@ -237,9 +221,35 @@ private:
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> m_groups {};
     std::vector<VkDynamicState> m_dynamic_state {};
 
-    VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
     uint32_t m_max_recursion_depth = 1;
 
+    std::vector<VkPushConstantRange> m_push_constants;
+    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
 private:
     uint32_t ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages);
+};
+
+class VulkanPipeline {
+    friend PipelineBuilder_Graphics;
+    friend PipelineBuilder_Compute;
+    friend PipelineBuilder_RayTracing;
+public:
+    VulkanPipeline(const VulkanDevice &device);
+    ~VulkanPipeline();
+
+    static inline PipelineBuilder_Graphics GraphicsBuilder(const VulkanDevice &device) { return PipelineBuilder_Graphics(device); }
+    static inline PipelineBuilder_Compute ComputeBuilder(const VulkanDevice &device)  { return PipelineBuilder_Compute(device); }
+    static inline PipelineBuilder_RayTracing RayTracingBuilder(const VulkanDevice &device)  { return PipelineBuilder_RayTracing(device); }
+
+    VkPipeline Pipeline() const { return m_pipeline; };
+    VkPipelineBindPoint BindPoint() const { return m_pipeline_type; };
+    VkPipelineLayout Layout() const { return m_pipeline_layout; };
+
+    void SetDebugName(std::string_view name);
+private:
+    const VulkanDevice &m_device;
+
+    VkPipelineBindPoint m_pipeline_type;
+    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
 };

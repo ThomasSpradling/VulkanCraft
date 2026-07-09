@@ -22,9 +22,9 @@ public:
 private:
     glm::vec3 m_position;
     glm::vec3 m_view;
+    float m_aspect = 1.0f;
 
     float m_fov = 45.0f;
-    float m_aspect = 45.0f;
     float m_near = 0.1f;
     float m_far = 1000.0f;
 };

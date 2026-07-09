@@ -1,4 +1,4 @@
-#include "PipelineBuilder.h"
+#include "VulkanPipeline.h"
 #include "Platform/Graphics/Common.h"
 #include <algorithm>
 #include <cassert>
@@ -7,13 +7,12 @@
 #include <unordered_map>
 #include <vector>
 
-/////////////////////////////////////////
+// =================================== //
 // ---- Graphics Pipeline Builder ---- //
-/////////////////////////////////////////
+// =================================== //
 
-PipelineBuilder_Graphics::PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout)
+PipelineBuilder_Graphics::PipelineBuilder_Graphics(const VulkanDevice &device)
     : m_device(device)
-    , m_pipeline_layout(layout)
 {}
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::FromBase(VkPipeline base_pipeline) {
@@ -31,11 +30,11 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddBinding(uint32_t binding,
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset) {
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddAttribute(uint32_t location, uint32_t binding, DataFormat format, uint32_t offset) {
     m_vertex_input_state.attribute_descriptions.push_back({
         .location = location,
         .binding = binding,
-        .format = format,
+        .format = m_device.GetFormat(format),
         .offset = offset,
     });
 
@@ -96,6 +95,8 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddShader(const CompiledShad
     fill_shader_entry(m_geometry_shader, ShaderStage::Geometry);
     fill_shader_entry(m_tesselation_control_shader, ShaderStage::TessellationControl);
     fill_shader_entry(m_tesselation_eval_shader, ShaderStage::TessellationEvaluation);
+    fill_shader_entry(m_task_shader, ShaderStage::Task);
+    fill_shader_entry(m_mesh_shader, ShaderStage::Mesh);
     fill_shader_entry(m_fragment_shader, ShaderStage::Fragment);
 
     return *this;
@@ -184,68 +185,84 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableAlphaToCoverageMSAA() 
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableBlending() {
-    m_color_blend_state.blend_enable = VK_FALSE;
-    m_color_blend_state.src_color_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.dst_color_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.src_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.dst_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.color_blend_op = VK_BLEND_OP_ADD;
-    m_color_blend_state.alpha_blend_op = VK_BLEND_OP_ADD;
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddColorAttachment(ColorAttachment attachment) {
+    VkPipelineColorBlendAttachmentState color_blend_attachment {
+        .blendEnable = VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+                        | VK_COLOR_COMPONENT_G_BIT
+                        | VK_COLOR_COMPONENT_B_BIT
+                        | VK_COLOR_COMPONENT_A_BIT,
+    };
 
+    switch (attachment.blending_mode) {
+        case BlendMode::Alpha: {
+            // out_color = src_alpha * src_color + (1 - src_alpha) * dst_color
+            // out_alpha = src_alpha + (1 - src_alpha) * dst_alpha
+
+            color_blend_attachment.blendEnable = VK_TRUE;
+            color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+            color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        }
+        case BlendMode::Premultiplied: {
+            // out_color = src_color + (1 - src_alpha) * dst_color
+            // out_alpha = src_alpha + (1 - src_alpha) * dst_alpha
+
+            color_blend_attachment.blendEnable = VK_TRUE;
+            color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+            color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        }
+        case BlendMode::Additive: {
+            // out_color = src_color + dst_color
+            // out_alpha = src_alpha + dst_alpha
+
+            color_blend_attachment.blendEnable = VK_TRUE;
+            color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+            color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        }
+        case BlendMode::Disabled:
+        default:
+            break;
+    }
+
+    m_attachment_color_formats.push_back(attachment.format);
+    m_attachment_blend_state.push_back(color_blend_attachment);
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableBlendingAlpha() {
-    m_color_blend_state.blend_enable = VK_TRUE;
-    m_color_blend_state.src_color_blend_factor = VK_BLEND_FACTOR_SRC_ALPHA;
-    m_color_blend_state.dst_color_blend_factor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    m_color_blend_state.src_alpha_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.dst_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.color_blend_op = VK_BLEND_OP_ADD;
-    m_color_blend_state.alpha_blend_op = VK_BLEND_OP_ADD;
 
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetDepthStencilAttachmentFormat(VkFormat format) {
+    return SetDepthAttachmentFormat(format)
+        .SetStencilAttachmentFormat(format);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetDepthAttachmentFormat(VkFormat format) {
+    m_depth_state.depth_format = format;
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableBlendingPremultipliedAlpha() {
-    m_color_blend_state.blend_enable = VK_TRUE;
-    m_color_blend_state.src_color_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.dst_color_blend_factor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    m_color_blend_state.src_alpha_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.dst_alpha_blend_factor = VK_BLEND_FACTOR_ZERO;
-    m_color_blend_state.color_blend_op = VK_BLEND_OP_ADD;
-    m_color_blend_state.alpha_blend_op = VK_BLEND_OP_ADD;
-
-    return *this;
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableBlendingAdditive() {
-    m_color_blend_state.blend_enable = VK_TRUE;
-    m_color_blend_state.src_color_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.dst_color_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.src_alpha_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.dst_alpha_blend_factor = VK_BLEND_FACTOR_ONE;
-    m_color_blend_state.color_blend_op = VK_BLEND_OP_ADD;
-    m_color_blend_state.alpha_blend_op = VK_BLEND_OP_ADD;
-
-    return *this;
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableBlending(VkBlendFactor src_color_blend_factor, VkBlendFactor dst_color_blend_factor, VkBlendOp color_blend_op, VkBlendFactor src_alpha_blend_factor, VkBlendFactor dst_alpha_blend_factor, VkBlendOp alpha_blend_op) {
-    m_color_blend_state.blend_enable = VK_TRUE;
-
-    m_color_blend_state.src_color_blend_factor = src_color_blend_factor;
-    m_color_blend_state.dst_color_blend_factor = dst_color_blend_factor;
-    m_color_blend_state.src_alpha_blend_factor = src_alpha_blend_factor;
-    m_color_blend_state.dst_alpha_blend_factor = dst_alpha_blend_factor;
-    m_color_blend_state.color_blend_op = color_blend_op;
-    m_color_blend_state.alpha_blend_op = alpha_blend_op;
-    return *this;
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::ClearDynamicState() {
-    m_dynamic_state.clear();
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetStencilAttachmentFormat(VkFormat format) {
+    m_stencil_state.stencil_format = format;
     return *this;
 }
 
@@ -254,33 +271,17 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddDynamicState(VkDynamicSta
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetLayout(VkPipelineLayout pipeline_layout) {
-    m_pipeline_layout = pipeline_layout;
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddPushConstant(const VkPushConstantRange &range) {
+    m_push_constants.push_back(range);
     return *this;
 }
 
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddColorAttachmentFormat(VkFormat format) {
-    m_attachment_formats.color_formats.push_back(format);
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
+    m_descriptor_layouts.push_back(layout);
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetDepthStencilAttachmentFormat(VkFormat format) {
-    return SetDepthAttachmentFormat(format)
-        .SetStencilAttachmentFormat(format);
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetDepthAttachmentFormat(VkFormat format) {
-    m_attachment_formats.depth_format = format;
-    return *this;
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetStencilAttachmentFormat(VkFormat format) {
-    m_attachment_formats.stencil_format = format;
-    return *this;
-}
-
-VkPipeline PipelineBuilder_Graphics::Build() {
+std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
     VkPipeline pipeline;
 
     //// Create Shader Stages ////
@@ -312,10 +313,9 @@ VkPipeline PipelineBuilder_Graphics::Build() {
     append_shader_stage_info(m_geometry_shader, ShaderStage::Geometry);
     append_shader_stage_info(m_tesselation_control_shader, ShaderStage::TessellationControl);
     append_shader_stage_info(m_tesselation_eval_shader, ShaderStage::TessellationEvaluation);
+    append_shader_stage_info(m_task_shader, ShaderStage::Task);
+    append_shader_stage_info(m_mesh_shader, ShaderStage::Mesh);
     append_shader_stage_info(m_fragment_shader, ShaderStage::Fragment);
-
-    assert(shader_stages.size() > 0 && "Cannot create pipeline without any shader stages!");
-    assert(m_pipeline_layout != VK_NULL_HANDLE && "Cannot create pipeline without a pipeline layout!");
 
     //// Get vertex layouts ////
     VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info {
@@ -337,6 +337,12 @@ VkPipeline PipelineBuilder_Graphics::Build() {
 
     //// Control points ////
     const bool has_tessellation_stage = m_tesselation_control_shader.has_value() || m_tesselation_eval_shader.has_value();
+    if (has_tessellation_stage) {
+        Assert(m_tesselation_control_shader, "Cannot have tessellation stage without a tessellation control shader!");
+        Assert(m_tesselation_eval_shader, "Cannot have tessellation stage without a tessellation evaluation shader!");
+        Assert(m_input_assembly_state.topology == VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, "Cannot have tessellation stage with a primitive topology other than PATCH_LIST!");
+    }
+
     VkPipelineTessellationStateCreateInfo tessellation_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
         .pNext = nullptr,
@@ -368,6 +374,11 @@ VkPipeline PipelineBuilder_Graphics::Build() {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .pNext = nullptr,
         .rasterizationSamples = m_multisample_state.sample_count,
+        .sampleShadingEnable = m_multisample_state.sample_shading_enabled,
+        .minSampleShading = m_multisample_state.min_sample_shading,
+        .pSampleMask = nullptr,
+        .alphaToCoverageEnable = m_multisample_state.alpha_to_coverage_enabled,
+        .alphaToOneEnable = VK_FALSE,
     };
 
     //// Depth/stencil tests ////
@@ -381,24 +392,13 @@ VkPipeline PipelineBuilder_Graphics::Build() {
     };
 
     //// Color Blending ////
-    VkPipelineColorBlendAttachmentState color_blend_attachment {
-        .blendEnable = m_color_blend_state.blend_enable,
-        .srcColorBlendFactor = m_color_blend_state.src_color_blend_factor,
-        .dstColorBlendFactor = m_color_blend_state.dst_color_blend_factor,
-        .colorBlendOp = m_color_blend_state.color_blend_op,
-        .srcAlphaBlendFactor = m_color_blend_state.src_alpha_blend_factor,
-        .dstAlphaBlendFactor = m_color_blend_state.dst_alpha_blend_factor,
-        .alphaBlendOp = m_color_blend_state.alpha_blend_op,
-        .colorWriteMask = m_color_blend_state.color_write_mask,
-    };
-
     VkPipelineColorBlendStateCreateInfo color_blend_state_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .pNext = nullptr,
         .logicOpEnable = VK_FALSE,
         .logicOp = VK_LOGIC_OP_COPY,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend_attachment,
+        .attachmentCount = static_cast<uint32_t>(m_attachment_blend_state.size()),
+        .pAttachments = m_attachment_blend_state.data(),
     };
 
     //// Dynamic State ////
@@ -412,15 +412,35 @@ VkPipeline PipelineBuilder_Graphics::Build() {
 
     //// Create Pipeline ////
 
+    VkFormat stencil_format = m_stencil_state.stencil_format;
+    if (m_stencil_state.stencil_test_enabled && stencil_format == VK_FORMAT_UNDEFINED)
+        stencil_format = m_device.GetDepthStencilFormat();
+    
+    VkFormat depth_format = m_depth_state.depth_format;
+    if ((m_depth_state.depth_test_enabled || m_depth_state.depth_write_enabled) && depth_format == VK_FORMAT_UNDEFINED) {
+        depth_format = stencil_format != VK_FORMAT_UNDEFINED ? m_device.GetDepthStencilFormat() : m_device.GetDepthOnlyFormat();
+    }
+
     VkPipelineRenderingCreateInfoKHR rendering_create_info {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
         .pNext = nullptr,
         .viewMask = 0,
-        .colorAttachmentCount = static_cast<uint32_t>(m_attachment_formats.color_formats.size()),
-        .pColorAttachmentFormats = m_attachment_formats.color_formats.data(),
-        .depthAttachmentFormat = m_attachment_formats.depth_format,
-        .stencilAttachmentFormat = m_attachment_formats.stencil_format,
+        .colorAttachmentCount = static_cast<uint32_t>(m_attachment_color_formats.size()),
+        .pColorAttachmentFormats = m_attachment_color_formats.data(),
+        .depthAttachmentFormat = depth_format,
+        .stencilAttachmentFormat = stencil_format,
     };
+
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
+        .pSetLayouts = m_descriptor_layouts.data(),
+        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
+        .pPushConstantRanges = m_push_constants.data(),
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
 
     VkGraphicsPipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -437,7 +457,7 @@ VkPipeline PipelineBuilder_Graphics::Build() {
         .pDepthStencilState = &depth_stencil_state_create_info,
         .pColorBlendState = &color_blend_state_create_info,
         .pDynamicState = &dynamic_state_create_info,
-        .layout = m_pipeline_layout,
+        .layout = pipeline_layout,
         .renderPass = VK_NULL_HANDLE,
         .subpass = 0,
         .basePipelineHandle = m_base_pipeline,
@@ -451,7 +471,11 @@ VkPipeline PipelineBuilder_Graphics::Build() {
 
     VK_CHECK(vkCreateGraphicsPipelines(m_device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
 
-    return pipeline;
+    auto result = std::make_unique<VulkanPipeline>(m_device);
+    result->m_pipeline_type = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    result->m_pipeline = pipeline;
+    result->m_pipeline_layout = pipeline_layout;
+    return result;
 }
 
 
@@ -474,13 +498,12 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::EmplaceShader(ShaderStage st
     return *this;
 }
 
-////////////////////////////////////////
+// ================================== //
 // ---- Compute Pipeline Builder ---- //
-////////////////////////////////////////
+// ================================== //
 
-PipelineBuilder_Compute::PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout)
+PipelineBuilder_Compute::PipelineBuilder_Compute(const VulkanDevice &device)
     : m_device(device)
-    , m_pipeline_layout(layout)
 {}
 
 PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader &shader, const std::string &entry_name) {
@@ -509,7 +532,18 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader
     return *this;
 }
 
-VkPipeline PipelineBuilder_Compute::Build() {
+
+PipelineBuilder_Compute &PipelineBuilder_Compute::AddPushConstant(const VkPushConstantRange &range) {
+    m_push_constants.push_back(range);
+    return *this;
+}
+
+PipelineBuilder_Compute &PipelineBuilder_Compute::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
+    m_descriptor_layouts.push_back(layout);
+    return *this;
+}
+
+std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
     std::unique_ptr<ShaderModule> shader_module = m_device.CreateShaderModule(m_shader.spirv_code);
 
     Assert(m_compute_shader.shader_stage == ShaderStage::Compute, "Expected compute shader to have type of compute!");
@@ -520,25 +554,40 @@ VkPipeline PipelineBuilder_Compute::Build() {
         .pName = m_compute_shader.entry_name.c_str(),
     };
 
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
+        .pSetLayouts = m_descriptor_layouts.data(),
+        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
+        .pPushConstantRanges = m_push_constants.data(),
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
+
     VkComputePipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
         .stage = shader_stage,
-        .layout = m_pipeline_layout,
+        .layout = pipeline_layout,
     };
 
     VkPipeline pipeline;
     VK_CHECK(vkCreateComputePipelines(m_device.Device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
-    return pipeline;
+    
+    auto result = std::make_unique<VulkanPipeline>(m_device);
+    result->m_pipeline_type = VK_PIPELINE_BIND_POINT_COMPUTE;
+    result->m_pipeline = pipeline;
+    result->m_pipeline_layout = pipeline_layout;
+    return result;
 }
 
-///////////////////////////////////////////
-// ---- RayTracing Pipeline Builder ---- //
-///////////////////////////////////////////
+// ====================================== //
+// ---- Ray Tracing Pipeline Builder ---- //
+// ====================================== //
 
-PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout)
+PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(const VulkanDevice &device)
     : m_device(device)
-    , m_pipeline_layout(layout)
 {}
 
 PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddShader(const CompiledShader &shader) {
@@ -603,11 +652,6 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddProceduralHitGroup(co
     return *this;
 }
 
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetLayout(VkPipelineLayout pipeline_layout) {
-    m_pipeline_layout = pipeline_layout;
-    return *this;
-}
-
 PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetMaxRayRecursionDepth(uint32_t value) {
     m_max_recursion_depth = value;
     return *this;
@@ -623,10 +667,20 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDynamicState(VkDynami
     return *this;
 }
 
-VkPipeline PipelineBuilder_RayTracing::Build() {
+
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddPushConstant(const VkPushConstantRange &range) {
+    m_push_constants.push_back(range);
+    return *this;
+}
+
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
+    m_descriptor_layouts.push_back(layout);
+    return *this;
+}
+
+std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
     Assert(!m_shader_entries.empty(), "Cannot create raytracing pipeline without shader stages!");
     Assert(!m_groups.empty(), "Cannot create raytracing pipeline without shader groups!");
-    Assert(m_pipeline_layout != VK_NULL_HANDLE, "Cannot create raytracing pipeline without a pipeline layout!");
 
     //// Create Shader Modules ////
 
@@ -661,6 +715,16 @@ VkPipeline PipelineBuilder_RayTracing::Build() {
     };
 
     //// Create Pipeline ////
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
+        .pSetLayouts = m_descriptor_layouts.data(),
+        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
+        .pPushConstantRanges = m_push_constants.data(),
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
 
     VkRayTracingPipelineCreateInfoKHR pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
@@ -671,12 +735,17 @@ VkPipeline PipelineBuilder_RayTracing::Build() {
         .pGroups = m_groups.data(),
         .maxPipelineRayRecursionDepth = m_max_recursion_depth,
         .pDynamicState = &dynamic_state_create_info,
-        .layout = m_pipeline_layout,
+        .layout = pipeline_layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VK_CHECK(vkCreateRayTracingPipelinesKHR(m_device.Device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline));
-    return pipeline;
+    
+    auto result = std::make_unique<VulkanPipeline>(m_device);
+    result->m_pipeline_type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+    result->m_pipeline = pipeline;
+    result->m_pipeline_layout = pipeline_layout;
+    return result;
 }
 
 uint32_t PipelineBuilder_RayTracing::ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages) {
@@ -726,3 +795,26 @@ uint32_t PipelineBuilder_RayTracing::ComputeShaderIndex(const ModuleEntry &entry
 
     throw std::runtime_error("Could not find raytracing entry " + entry.entry_point + "() in shader module '" + entry.module_name + "'!");
 }
+
+// ========================= //
+// ---- Vulkan Pipeline ---- //
+// ========================= //
+
+VulkanPipeline::VulkanPipeline(const VulkanDevice &device)
+    : m_device(device)
+{}
+
+VulkanPipeline::~VulkanPipeline() {
+    if (m_pipeline_layout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(m_device.Device(), m_pipeline_layout, nullptr);
+
+    if (m_pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(m_device.Device(), m_pipeline, nullptr);
+}
+
+void VulkanPipeline::SetDebugName(std::string_view name) {
+    std::string debug_name(name);
+    m_device.SetDebugName(m_pipeline, debug_name);
+    m_device.SetDebugName(m_pipeline_layout, debug_name + " Layout");
+}
+

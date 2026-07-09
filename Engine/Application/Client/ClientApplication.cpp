@@ -16,6 +16,9 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
         .title = config.window_title,
     });
 
+    m_target_fps = config.target_fps;
+    m_update_rate = config.update_rate;
+
     m_renderer = std::make_unique<Renderer>(*m_window);
     m_input_handler = std::make_unique<InputHandler>(*m_window);
 

@@ -9,6 +9,7 @@
 #include "Platform/Graphics/VulkanSwapChain.h"
 #include "Platform/Window/Window.h"
 #include "Platform/Graphics/ShaderCompiler.h"
+#include "Platform/Graphics/VulkanPipeline.h"
 #include <memory>
 #include <optional>
 
@@ -79,8 +80,7 @@ private:
     std::unique_ptr<DescriptorAllocator> m_descriptor_allocator;
     VkDescriptorSetLayout m_scene_layout = VK_NULL_HANDLE;
 
-    VkPipelineLayout m_triangle_pipeline_layout = VK_NULL_HANDLE;
-    VkPipeline m_triangle_pipeline = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
 
     std::optional<CompiledShader> m_triangle_shader;
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "CommandBuffer.h"
 #include <cstddef>
 #include <memory>
 #include <string_view>
@@ -54,6 +53,7 @@ private:
     VkFence m_fence = VK_NULL_HANDLE;
 };
 
+class CommandBuffer;
 class VulkanCommandPool {
     friend CommandBuffer;
 public:

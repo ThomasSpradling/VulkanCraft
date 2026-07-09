@@ -251,17 +251,8 @@ void CommandBuffer::EndRendering() const {
     vkCmdEndRendering(m_command_buffer);
 }
 
-void CommandBuffer::BindGraphicsPipeline(VkPipeline pipeline) const {
-    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-}
-
-void CommandBuffer::BindComputePipeline(VkPipeline pipeline) const {
-    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-}
-
-
-void CommandBuffer::BindRayTracingPipeline(VkPipeline pipeline) const {
-    vkCmdBindPipeline(m_command_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
+void CommandBuffer::BindPipeline(const VulkanPipeline &pipeline) const {
+    vkCmdBindPipeline(m_command_buffer, pipeline.BindPoint(), pipeline.Pipeline());
 }
 
 void CommandBuffer::SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const {
@@ -307,8 +298,8 @@ void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) {
     vkCmdCopyImage(m_command_buffer, src.Image(), src.Layout(), dst.Image(), dst.Layout(), 1, &region);
 }
 
-void CommandBuffer::BindDescriptorSet(VkPipelineBindPoint bind_point, uint32_t set, VkPipelineLayout layout, VkDescriptorSet descriptor_set) {
-    vkCmdBindDescriptorSets(m_command_buffer, bind_point, layout, set, 1, &descriptor_set, 0, nullptr);
+void CommandBuffer::BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set) {
+    vkCmdBindDescriptorSets(m_command_buffer, pipeline.BindPoint(), pipeline.Layout(), set, 1, &descriptor_set, 0, nullptr);
 }
 
 void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) {

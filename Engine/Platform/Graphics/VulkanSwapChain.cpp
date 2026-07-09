@@ -124,8 +124,8 @@ void VulkanSwapChain::CreateSwapChain() {
             present_mode = VK_PRESENT_MODE_FIFO_KHR;
         } else {
             std::vector<VkPresentModeKHR> preferred_present_modes {
-                VK_PRESENT_MODE_IMMEDIATE_KHR,
                 VK_PRESENT_MODE_MAILBOX_KHR,
+                VK_PRESENT_MODE_IMMEDIATE_KHR,
                 VK_PRESENT_MODE_FIFO_KHR,
             };
 

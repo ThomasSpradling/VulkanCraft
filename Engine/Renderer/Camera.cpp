@@ -6,6 +6,11 @@
 #include "Core/Math.h"
 
 void Camera::SetAspect(uint32_t width, uint32_t height) {
+    if (height == 0) {
+        m_aspect = 1.0f;
+        return;
+    }
+
     m_aspect = static_cast<float>(width) / static_cast<float>(height);
 }
 

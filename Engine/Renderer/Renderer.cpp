@@ -3,7 +3,6 @@
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/DescriptorLayoutBuilder.h"
 #include "Platform/Graphics/DescriptorWriter.h"
-#include "Platform/Graphics/PipelineBuilder.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanImage.h"
@@ -146,9 +145,6 @@ void Renderer::CreateObjects() {
             .Write(frame.descriptor_set);
     }
 
-    const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
-    m_camera.SetAspect(extent.width, extent.height);
-
     m_triangle_shader = m_shader_compiler->Compile("triangle");
     Assert(m_triangle_shader, "Failed to compile triangle shader!");
 
@@ -243,6 +239,11 @@ void Renderer::DestroyObjects() {
     if (m_device)
         vkDeviceWaitIdle(m_device->Device());
 
+    if (m_scene_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device->Device(), m_scene_layout, nullptr);
+        m_scene_layout = VK_NULL_HANDLE;
+    }
+
     m_vertex_buffer.reset();
     m_index_buffer.reset();
 
@@ -254,6 +255,9 @@ void Renderer::DestroyObjects() {
 }
 
 void Renderer::UpdateSceneData() {
+    const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
+    m_camera.SetAspect(extent.width, extent.height);
+
     FrameContext &frame = m_frame_data[m_frame_index];
 
     auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
@@ -299,11 +303,11 @@ void Renderer::RecordCommands(const FrameContext &frame) {
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
         cmd.BeginRendering(attachments);
-            cmd.BindGraphicsPipeline(m_triangle_pipeline);
+            cmd.BindPipeline(*m_triangle_pipeline);
             cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
 
-            cmd.BindDescriptorSet(VK_PIPELINE_BIND_POINT_GRAPHICS, 0, m_triangle_pipeline_layout, frame.descriptor_set);
-            cmd.PushConstants(m_triangle_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, m_push_constant);
+            cmd.BindDescriptorSet(0, *m_triangle_pipeline, frame.descriptor_set);
+            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT, m_push_constant);
 
             cmd.BindVertexBuffer(m_vertex_buffer->Buffer());
             cmd.BindIndexBuffer(m_index_buffer->Buffer());
@@ -362,63 +366,38 @@ void Renderer::CreateTrianglePipeline() {
         .size = sizeof(PushConstantData),
     };
 
-    VkPipelineLayoutCreateInfo layout_create_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pNext = nullptr,
-        .setLayoutCount = 1,
-        .pSetLayouts = &m_scene_layout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &range,
-    };
-
-    VK_CHECK(vkCreatePipelineLayout(
-        m_device->Device(),
-        &layout_create_info,
-        nullptr,
-        &m_triangle_pipeline_layout
-    ));
-
     Assert(m_triangle_shader, "Triangle shader was not compiled!");
 
-    auto builder = PipelineBuilder_Graphics(*m_device, m_triangle_pipeline_layout)
-        .FromBase(m_triangle_pipeline)
+    auto builder = VulkanPipeline::GraphicsBuilder(*m_device)
         .AddShader(*m_triangle_shader)
         .AddBinding(0, sizeof(MeshVertex))
-        .AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position))
-        .AddAttribute(1, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, uv_x))
-        .AddAttribute(2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal))
-        .AddAttribute(3, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, uv_y))
-        .AddAttribute(4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color))
+        .AddAttribute(0, 0, DataFormat::Float3, offsetof(MeshVertex, position))
+        .AddAttribute(1, 0, DataFormat::Float, offsetof(MeshVertex, uv_x))
+        .AddAttribute(2, 0, DataFormat::Float3, offsetof(MeshVertex, normal))
+        .AddAttribute(3, 0, DataFormat::Float, offsetof(MeshVertex, uv_y))
+        .AddAttribute(4, 0, DataFormat::Float4, offsetof(MeshVertex, color))
         
         .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .SetPolygonMode(VK_POLYGON_MODE_FILL)
 
         .EnableDepthTest()
-        .DisableBlending()
-        .AddColorAttachmentFormat(m_device->GetColorFormat())
-        .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat());
+        .AddColorAttachment({
+            .format = m_device->GetColorFormat(),
+            .blending_mode = BlendMode::Disabled,
+        })
+        .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat())
+        .AddPushConstant(range)
+        .AddDescriptorSetLayout(m_scene_layout);
+
+    if (m_triangle_pipeline)
+        builder.FromBase(m_triangle_pipeline->Pipeline());
 
     m_triangle_pipeline = builder.Build();
-
-    m_device->SetDebugName(m_triangle_pipeline_layout, "Triangle Pipeline Layout");
-    m_device->SetDebugName(m_triangle_pipeline, "Triangle Pipeline");
+    m_triangle_pipeline->SetDebugName("Triangle Pipeline");
 }
 
 void Renderer::DestroyTrianglePipeline() {
-    if (m_triangle_pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device->Device(), m_triangle_pipeline, nullptr);
-        m_triangle_pipeline = VK_NULL_HANDLE;
-    }
-
-    if (m_triangle_pipeline_layout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device->Device(), m_triangle_pipeline_layout, nullptr);
-        m_triangle_pipeline_layout = VK_NULL_HANDLE;
-    }
-
-    if (m_scene_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device->Device(), m_scene_layout, nullptr);
-        m_scene_layout = VK_NULL_HANDLE;
-    }
+    m_triangle_pipeline.reset();
 }
 
 void Renderer::RecreateSwapChain() {

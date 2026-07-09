@@ -13,6 +13,9 @@ void InputHandler::Update() {
 
     for (auto &button : m_window.m_mouse.buttons)
         button.pressed = false;
+
+    m_window.m_mouse.delta = glm::vec2(0.0f);
+    m_window.m_mouse.wheel.offset_y = 0.0f;
 }
 
 bool InputHandler::IsKeyPressed(int key) const {

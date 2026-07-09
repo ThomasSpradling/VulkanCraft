@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include "VulkanBuffer.h"
 
 constexpr uint32_t MaxMipmaps = std::numeric_limits<uint32_t>::max();
 
@@ -67,7 +68,7 @@ private:
     std::span<uint32_t> m_queue_families {};
 };
 
-class VulkanImage;
+class ImageBarrier;
 
 class VulkanImage {
     friend VulkanImageBuilder;

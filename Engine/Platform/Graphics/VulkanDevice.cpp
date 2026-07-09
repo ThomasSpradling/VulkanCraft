@@ -13,6 +13,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "CommandBuffer.h"
 
 #include <GLFW/glfw3.h>
 
@@ -43,6 +44,54 @@ VulkanDevice::~VulkanDevice() {
     DestroyVulkanInstance();
 
     std::cout << "Destroyed Vulkan Device.\n";
+}
+
+VkFormat VulkanDevice::GetFormat(DataFormat format) const {
+    switch (format) {
+        case DataFormat::Color:     return m_image_formats.color;
+        case DataFormat::Depth:     return m_image_formats.depth;
+        case DataFormat::DepthStencil: return m_image_formats.depth_stencil;
+        case DataFormat::HDR:       return m_image_formats.hdr;
+
+        case DataFormat::Float:     return VK_FORMAT_R32_SFLOAT;
+        case DataFormat::Float2:    return VK_FORMAT_R32G32_SFLOAT;
+        case DataFormat::Float3:    return VK_FORMAT_R32G32B32_SFLOAT;
+        case DataFormat::Float4:    return VK_FORMAT_R32G32B32A32_SFLOAT;
+
+        case DataFormat::Int:       return VK_FORMAT_R32_SINT;
+        case DataFormat::Int2:      return VK_FORMAT_R32G32_SINT;
+        case DataFormat::Int3:      return VK_FORMAT_R32G32B32_SINT;
+        case DataFormat::Int4:      return VK_FORMAT_R32G32B32A32_SINT;
+
+        case DataFormat::UInt:      return VK_FORMAT_R32_UINT;
+        case DataFormat::UInt2:     return VK_FORMAT_R32G32_UINT;
+        case DataFormat::UInt3:     return VK_FORMAT_R32G32B32_UINT;
+        case DataFormat::UInt4:     return VK_FORMAT_R32G32B32A32_UINT;
+
+        case DataFormat::Short:     return VK_FORMAT_R16_SINT;
+        case DataFormat::Short2:    return VK_FORMAT_R16G16_SINT;
+        case DataFormat::Short3:    return VK_FORMAT_R16G16B16_SINT;
+        case DataFormat::Short4:    return VK_FORMAT_R16G16B16A16_SINT;
+
+        case DataFormat::UShort:     return VK_FORMAT_R16_UINT;
+        case DataFormat::UShort2:    return VK_FORMAT_R16G16_UINT;
+        case DataFormat::UShort3:    return VK_FORMAT_R16G16B16_UINT;
+        case DataFormat::UShort4:    return VK_FORMAT_R16G16B16A16_UINT;
+
+        case DataFormat::Byte:     return VK_FORMAT_R8_SINT;
+        case DataFormat::Byte2:    return VK_FORMAT_R8G8_SINT;
+        case DataFormat::Byte3:    return VK_FORMAT_R8G8B8_SINT;
+        case DataFormat::Byte4:    return VK_FORMAT_R8G8B8A8_SINT;
+
+        case DataFormat::UByte:     return VK_FORMAT_R8_UINT;
+        case DataFormat::UByte2:    return VK_FORMAT_R8G8_UINT;
+        case DataFormat::UByte3:    return VK_FORMAT_R8G8B8_UINT;
+        case DataFormat::UByte4:    return VK_FORMAT_R8G8B8A8_UINT;
+
+        case DataFormat::None:
+        default:
+            return VK_FORMAT_UNDEFINED;
+    }
 }
 
 VkQueue VulkanDevice::Queue(QueueType type) const {

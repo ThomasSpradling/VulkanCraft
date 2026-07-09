@@ -4,13 +4,13 @@ add_library(platform_graphics STATIC
     DescriptorAllocator.cpp
     DescriptorLayoutBuilder.cpp
     DescriptorWriter.cpp
-    PipelineBuilder.cpp
     ShaderCompiler.cpp
     ShaderReflection.cpp
     VulkanObjects.cpp
     VulkanBuffer.cpp
     VulkanDevice.cpp
     VulkanImage.cpp
+    VulkanPipeline.cpp
     VulkanSwapChain.cpp
     VmaImplementation.cpp
 )

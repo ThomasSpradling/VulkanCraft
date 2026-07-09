@@ -58,6 +58,14 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::TessellationEvaluationShader
     return EmplaceShader(ShaderStage::TessellationEvaluation, m_tesselation_eval_shader, shader, entry);
 }
 
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::TaskShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::Task, m_task_shader, shader, entry);
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::MeshShader(const CompiledShader &shader, const std::string &entry) {
+    return EmplaceShader(ShaderStage::Mesh, m_mesh_shader, shader, entry);
+}
+
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::GeometryShader(const CompiledShader &shader, const std::string &entry) {
     return EmplaceShader(ShaderStage::Geometry, m_geometry_shader, shader, entry);
 }
@@ -417,7 +425,7 @@ VkPipeline PipelineBuilder_Graphics::Build() {
     VkGraphicsPipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &rendering_create_info,
-        // .flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
+        .flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
         .stageCount = static_cast<uint32_t>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = &vertex_input_state_create_info,

@@ -3,6 +3,7 @@
 #include "Platform/Graphics/Common.h"
 #include <glm/glm.hpp>
 #include <string_view>
+#include <variant>
 #include <vector>
 #include <volk.h>
 
@@ -53,10 +54,16 @@ enum class AttachmentType : uint8_t {
 
 struct ImageAttachment {
     AttachmentType type;
-    bool msaa = false;
-
     const VulkanImage &image;
+    
+    bool msaa = false;
     const VulkanImage *resolve_image = nullptr;
+
+    bool should_clear = true;
+
+    glm::vec4 clear_color = glm::vec4(0.0f);
+    float clear_depth = 1.0f;
+    uint32_t clear_stencil = 0u;
 };
 
 class CommandBuffer {
@@ -73,9 +80,9 @@ public:
     //// General Commands ////
 
     void BeginRendering(const VulkanImage &color_image, glm::vec4 clear_color = glm::vec4(0.0)) const;
-    void BeginRendering(const VulkanImage &color_image, const VulkanImage &depth_image, glm::vec4 clear_color = glm::vec4(0.0), float clear_depth = 0) const;
-    void BeginRendering(const std::vector<ImageAttachment> &render_targets, glm::vec4 clear_color = glm::vec4(0.0), float clear_depth = 0, uint32_t clear_stencil = 0) const;
-    void BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area, glm::vec4 clear_color = glm::vec4(0.0), float clear_depth = 0, uint32_t clear_stencil = 0) const;
+    void BeginRendering(const VulkanImage &color_image, const VulkanImage &depth_image, glm::vec4 clear_color = glm::vec4(0.0), float clear_depth = 1.0f) const;
+    void BeginRendering(const std::vector<ImageAttachment> &render_targets) const;
+    void BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area) const;
     void EndRendering() const;
 
     void BindGraphicsPipeline(VkPipeline pipeline) const;
@@ -86,6 +93,18 @@ public:
 
     void CopyImage(const VulkanImage &src, const VulkanImage &dst);
 
+    void BindDescriptorSet(VkPipelineBindPoint bind_point, uint32_t set, VkPipelineLayout layout, VkDescriptorSet descriptor_set);
+    
+    template<typename T>
+    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, uint32_t offset, uint32_t size, const T &data) {
+        vkCmdPushConstants(m_command_buffer, layout, stage, offset, size, &data);
+    }
+
+    template<typename T>
+    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, const T &data) {
+        vkCmdPushConstants(m_command_buffer, layout, stage, 0, sizeof(T), &data);
+    }
+
     //// Debug Commands ////
     void BeginLabel(const std::string &label, glm::vec4 color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
     void EndLabel();
@@ -93,7 +112,11 @@ public:
 
     //// Graphics Commands ////
 
+    void BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset = 0);
+    void BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset = 0);
+
     void Draw(uint32_t vertex_count, uint32_t instance_count = 1, uint32_t first_vertex = 0, uint32_t first_instance = 0) const;
+    void DrawIndexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0) const;
 public:
     //// Utilities ////
 

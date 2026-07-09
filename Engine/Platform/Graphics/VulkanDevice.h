@@ -52,6 +52,11 @@ public:
     VkSurfaceKHR Surface() const { return m_surface; }
     VmaAllocator Allocator() const { return m_allocator; }
 
+    VkFormat GetColorFormat() const { return m_image_formats.color; }
+    VkFormat GetDepthStencilFormat() const { return m_image_formats.depth_stencil; }
+    VkFormat GetDepthOnlyFormat() const { return m_image_formats.depth; }
+    VkFormat GetHDRFormat() const { return m_image_formats.hdr; }
+
     bool EnabledValidations() const { return m_config.enable_validation; }
 
     VkQueue Queue(QueueType type) const;
@@ -115,6 +120,13 @@ private:
         VkCommandBuffer command_buffer = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
     };
+
+    struct ImageFormats {
+        VkFormat color;
+        VkFormat depth_stencil;
+        VkFormat depth;
+        VkFormat hdr;
+    };
 private:
     const DeviceConfig m_config {};
 
@@ -136,6 +148,8 @@ private:
     ImmediateContext m_immediate_transfer;
 
     VmaAllocator m_allocator = nullptr;
+
+    ImageFormats m_image_formats {};
 private:
     void CreateVulkanInstance();
     void DestroyVulkanInstance();
@@ -154,6 +168,7 @@ private:
 
     VkPhysicalDevice ChoosePhysicalDevice();
     std::vector<VkDeviceQueueCreateInfo> ChooseQueues();
+    void ChooseImageFormats();
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,

@@ -2,6 +2,7 @@ add_library(engine_renderer STATIC
     DebugRenderer.cpp
     Renderer.cpp
     Renderer2D.cpp
+    Camera.cpp
 )
 
 target_link_libraries(engine_renderer PUBLIC

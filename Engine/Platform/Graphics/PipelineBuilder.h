@@ -35,6 +35,8 @@ public:
     PipelineBuilder_Graphics &GeometryShader(const CompiledShader &shader, const std::string &entry);
     PipelineBuilder_Graphics &TessellationControlShader(const CompiledShader &shader, const std::string &entry);
     PipelineBuilder_Graphics &TessellationEvaluationShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &TaskShader(const CompiledShader &shader, const std::string &entry);
+    PipelineBuilder_Graphics &MeshShader(const CompiledShader &shader, const std::string &entry);
     PipelineBuilder_Graphics &FragmentShader(const CompiledShader &shader, const std::string &entry);
     
     PipelineBuilder_Graphics &SetTopology(VkPrimitiveTopology topology);
@@ -104,6 +106,8 @@ private:
     std::optional<ShaderEntry> m_geometry_shader;
     std::optional<ShaderEntry> m_tesselation_control_shader;
     std::optional<ShaderEntry> m_tesselation_eval_shader;
+    std::optional<ShaderEntry> m_task_shader;
+    std::optional<ShaderEntry> m_mesh_shader;
     std::optional<ShaderEntry> m_fragment_shader;
 
     struct VertexInputState {

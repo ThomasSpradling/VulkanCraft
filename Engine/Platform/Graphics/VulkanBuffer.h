@@ -14,7 +14,6 @@ public:
     VulkanBufferBuilder &Size(VkDeviceSize size);
     VulkanBufferBuilder &AddUsage(VkBufferUsageFlags usage);
     VulkanBufferBuilder &AddMemoryFlags(VmaAllocationCreateFlags flag);
-    VulkanBufferBuilder &DebugName(const std::string &name);
     
     // For larger data to ensure that this memory has its own dedicated
     // memory block.
@@ -23,8 +22,6 @@ public:
     VulkanBufferBuilder &SharedQueueFamilies(std::span<uint32_t> queues);
     std::unique_ptr<VulkanBuffer> Build(const VulkanDevice &device);
 private:
-    std::string m_debug_name = "";
-
     VkDeviceSize m_size = 0ull;
     VkBufferUsageFlags m_usage = 0;
     VmaAllocationCreateFlags m_memory_flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;

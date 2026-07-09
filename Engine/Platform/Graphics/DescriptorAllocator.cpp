@@ -6,11 +6,11 @@
 
 DescriptorAllocator::DescriptorAllocator(const VulkanDevice &device, uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios)
     : m_device(device)
+    , m_ratios(ratios)
 {
     m_sets_per_pool = max_sets;
     VkDescriptorPool pool = CreateDescriptorPool();
     m_sets_per_pool = static_cast<uint32_t>(std::floor(static_cast<float>(max_sets) * 1.5f));
-    m_ratios = ratios;
     m_ready_pools.push_back(pool);
 }
 

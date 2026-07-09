@@ -28,6 +28,8 @@ VulkanDevice::VulkanDevice(const Window &window, DeviceConfig config)
     CreateVulkanMemoryAllocator();
     
     CreateImmediateObjects();
+    
+    ChooseImageFormats();
 
     std::cout << "Created Vulkan Device.\n";    
 }
@@ -672,6 +674,56 @@ std::vector<VkDeviceQueueCreateInfo> VulkanDevice::ChooseQueues() {
     add_queue_family(m_dedicated_compute_queue.queue_family);
 
     return result;
+}
+
+void VulkanDevice::ChooseImageFormats() {
+    const auto pick_supported_format = [&](const std::vector<VkFormat> &candidates, VkFormatFeatureFlags feature) {
+        for (VkFormat format : candidates) {
+            VkFormatProperties properties;
+            vkGetPhysicalDeviceFormatProperties(m_physical_device, format, &properties);
+            if (properties.optimalTilingFeatures & feature) {
+                return format;
+            }
+        }
+        return VK_FORMAT_UNDEFINED;
+    };
+
+    {
+        //// COLOR ////
+        // ordered from most preferable
+        const std::vector<VkFormat> color_candidates = {
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_R8G8B8A8_SRGB
+        };
+        m_image_formats.color = pick_supported_format(color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+
+        //// DEPTH STENCIL ////
+        const std::vector<VkFormat> depth_stencil_candidates = {
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT,
+            VK_FORMAT_D16_UNORM_S8_UINT
+        };
+        m_image_formats.depth_stencil = pick_supported_format(depth_stencil_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        Assert(m_image_formats.depth_stencil != VK_FORMAT_UNDEFINED, "Cannot find valid depth-stencil format");
+
+        //// DEPTH ONLY ////
+        const std::vector<VkFormat> depth_candidates = {
+            VK_FORMAT_D32_SFLOAT,
+            VK_FORMAT_D16_UNORM,
+        };
+        m_image_formats.depth = pick_supported_format(depth_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        Assert(m_image_formats.depth != VK_FORMAT_UNDEFINED, "Cannot find valid depth format");
+
+        //// HDR COLOR ////
+        const std::vector<VkFormat> hdr_color_candidates = {
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+            VK_FORMAT_R8G8B8A8_SRGB // not a valid HDR format, but will do as fallback
+        };
+        m_image_formats.hdr = pick_supported_format(hdr_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid HDR format");
+    }
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,

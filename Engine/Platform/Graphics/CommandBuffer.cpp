@@ -143,8 +143,10 @@ void CommandBuffer::BeginRendering(const VulkanImage &color_image, glm::vec4 cle
         ImageAttachment{
             .type = AttachmentType::Color,
             .image = color_image,
+            .should_clear = true,
+            .clear_color = clear_color,
         },
-    }, clear_color);
+    });
 }
 
 void CommandBuffer::BeginRendering(const VulkanImage &color_image, const VulkanImage &depth_image, glm::vec4 clear_color, float clear_depth) const {
@@ -152,15 +154,19 @@ void CommandBuffer::BeginRendering(const VulkanImage &color_image, const VulkanI
         ImageAttachment{
             .type = AttachmentType::Color,
             .image = color_image,
+            .should_clear = true,
+            .clear_color = clear_color,
         },
         ImageAttachment{
             .type = AttachmentType::Depth,
             .image = depth_image,
+            .should_clear = true,
+            .clear_depth = clear_depth
         },
-    }, clear_color, clear_depth);
+    });
 }
 
-void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets, glm::vec4 clear_color, float clear_depth, uint32_t clear_stencil) const {
+void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets) const {
     if (render_targets.empty())
         throw std::runtime_error("Cannot begin rendering without any render targets!");
     
@@ -173,10 +179,10 @@ void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_ta
             .height = extent.height,
         },
     };
-    BeginRendering(render_targets, render_area, clear_color, clear_depth, clear_stencil);
+    BeginRendering(render_targets, render_area);
 }
 
-void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area, glm::vec4 clear_color, float clear_depth, uint32_t clear_stencil) const {
+void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_targets, VkRect2D render_area) const {
     if (render_targets.empty())
         throw std::runtime_error("Cannot begin rendering without any render targets!");
     
@@ -185,26 +191,28 @@ void CommandBuffer::BeginRendering(const std::vector<ImageAttachment> &render_ta
     std::vector<VkRenderingAttachmentInfo> stencil_attachments {};
 
     for (const auto &attachment : render_targets) {
-        VkClearValue clear_value {};
-        if (attachment.type == AttachmentType::Depth || attachment.type == AttachmentType::Stencil) {
-            clear_value.depthStencil = {
-                .depth = clear_depth,
-                .stencil = clear_stencil,
-            };
-        } else if (attachment.type == AttachmentType::Color) {
-            clear_value.color = {
-                .float32 = { clear_color.x, clear_color.y, clear_color.z, clear_color.w },
-            };
-        }
-
         VkRenderingAttachmentInfo attachment_info {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = attachment.image.View(),
             .imageLayout = attachment.image.Layout(),
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = clear_value,
         };
+
+        if (attachment.should_clear) {
+            attachment_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            if (attachment.type == AttachmentType::Depth || attachment.type == AttachmentType::Stencil) {
+                attachment_info.clearValue.depthStencil = {
+                    .depth = attachment.clear_depth,
+                    .stencil = attachment.clear_stencil,
+                };
+            } else if (attachment.type == AttachmentType::Color) {
+                const glm::vec4 clear_color = attachment.clear_color;
+                attachment_info.clearValue.color = {
+                    .float32 = { clear_color.x, clear_color.y, clear_color.z, clear_color.w }
+                };
+            }
+        }
 
         if (attachment.msaa && attachment.image.SampleCount() > 1u) {
             if (attachment.resolve_image == nullptr)
@@ -299,6 +307,10 @@ void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) {
     vkCmdCopyImage(m_command_buffer, src.Image(), src.Layout(), dst.Image(), dst.Layout(), 1, &region);
 }
 
+void CommandBuffer::BindDescriptorSet(VkPipelineBindPoint bind_point, uint32_t set, VkPipelineLayout layout, VkDescriptorSet descriptor_set) {
+    vkCmdBindDescriptorSets(m_command_buffer, bind_point, layout, set, 1, &descriptor_set, 0, nullptr);
+}
+
 void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) {
     if (!m_command_pool.m_device.EnabledValidations())
         return;
@@ -340,8 +352,20 @@ void CommandBuffer::InsertLabel(const std::string &label, glm::vec4 color) {
     vkCmdInsertDebugUtilsLabelEXT(m_command_buffer, &label_info);
 }
 
+void CommandBuffer::BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset) {
+    vkCmdBindVertexBuffers(m_command_buffer, 0, 1, &buffer, &offset);
+}
+
+void CommandBuffer::BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset) {
+    vkCmdBindIndexBuffer(m_command_buffer, buffer, offset, VK_INDEX_TYPE_UINT32);
+}
+
 void CommandBuffer::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance) const {
     vkCmdDraw(m_command_buffer, vertex_count, instance_count, first_vertex, first_instance);
+}
+
+void CommandBuffer::DrawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance) const {
+    vkCmdDrawIndexed(m_command_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
 }
 
 void CommandBuffer::SetDebugName(std::string_view name) const {

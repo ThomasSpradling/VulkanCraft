@@ -440,6 +440,13 @@ void VulkanDevice::CreateVulkanDevice() {
     // Enabling Vulkan features
     std::vector<VkBaseOutStructure *> feature_chain;
 
+    VkPhysicalDeviceFeatures2 feat10 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .features = {
+            .fillModeNonSolid = VK_TRUE,
+        }
+    };
+
     VkPhysicalDeviceVulkan11Features feat11 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
         .shaderDrawParameters = VK_TRUE,
@@ -459,6 +466,7 @@ void VulkanDevice::CreateVulkanDevice() {
         .maintenance4 = VK_TRUE,
     };
 
+    feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat10));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat11));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat12));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat13));

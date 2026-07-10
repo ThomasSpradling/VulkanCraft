@@ -61,6 +61,10 @@ private:
     struct PushConstantData {
         glm::mat4 model;
     };
+
+    struct SpecializationConstantData {
+        VkBool32 is_wireframe = false;
+    };
 private:
     static constexpr uint32_t MaxFramesInFlight = 2;
     const Window &m_window;
@@ -81,6 +85,7 @@ private:
     VkDescriptorSetLayout m_scene_layout = VK_NULL_HANDLE;
 
     std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
+    std::unique_ptr<VulkanPipeline> m_wireframe_pipeline;
 
     std::optional<CompiledShader> m_triangle_shader;
 
@@ -88,6 +93,7 @@ private:
     std::unique_ptr<VulkanBuffer> m_index_buffer;
 
     PushConstantData m_push_constant;
+    SpecializationConstantData m_specialization_constant;
 
     Camera m_camera {};
 private:

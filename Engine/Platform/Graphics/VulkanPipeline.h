@@ -64,6 +64,7 @@ public:
     PipelineBuilder_Graphics &SetLineWidth(float width);
 
     PipelineBuilder_Graphics &EnableDepthTest(VkCompareOp compare_op = VK_COMPARE_OP_LESS);
+    PipelineBuilder_Graphics &DisableDepthTest();
     PipelineBuilder_Graphics &DisableDepthWrite();
     PipelineBuilder_Graphics &EnableStencilTest();
 
@@ -81,6 +82,7 @@ public:
     
     PipelineBuilder_Graphics &AddPushConstant(const VkPushConstantRange &range);
     PipelineBuilder_Graphics &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
+    PipelineBuilder_Graphics &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
 private:
@@ -151,6 +153,7 @@ private:
 
     std::vector<VkPushConstantRange> m_push_constants;
     std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
+    VkSpecializationInfo *m_specialization_constants = nullptr;
 
     VkPipeline m_base_pipeline = VK_NULL_HANDLE;
 private:
@@ -165,6 +168,7 @@ public:
 
     PipelineBuilder_Compute &AddPushConstant(const VkPushConstantRange &range);
     PipelineBuilder_Compute &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
+    PipelineBuilder_Compute &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
 private:
@@ -175,6 +179,7 @@ private:
 
     std::vector<VkPushConstantRange> m_push_constants;
     std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
+    VkSpecializationInfo *m_specialization_constants = nullptr;
 };
 
 struct ModuleEntry {
@@ -211,6 +216,7 @@ public:
     
     PipelineBuilder_RayTracing &AddPushConstant(const VkPushConstantRange &range);
     PipelineBuilder_RayTracing &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
+    PipelineBuilder_RayTracing &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
 private:
@@ -225,6 +231,7 @@ private:
 
     std::vector<VkPushConstantRange> m_push_constants;
     std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
+    VkSpecializationInfo *m_specialization_constants = nullptr;
 private:
     uint32_t ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages);
 };

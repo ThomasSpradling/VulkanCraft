@@ -16,16 +16,14 @@ struct GlobalSceneData {
     float4 sun_direction; // w = power
     float ambient;
 };
-
-[[vk::binding(0, 0)]]
-ConstantBuffer<GlobalSceneData> g_scene;
+[[vk::binding(0, 0)]] ConstantBuffer<GlobalSceneData> g_scene;
 
 struct PushConstantData {
     float4x4 model;
 }
+[[vk::push_constant]] ConstantBuffer<PushConstantData> g_push_constant;
 
-[[vk::push_constant]]
-ConstantBuffer<PushConstantData> g_push_constant;
+[[SpecializationConstant]] const bool WIREFRAME = false;
 
 struct VertexInput {
     float3 position;
@@ -51,8 +49,8 @@ VertexOutput main_vert(VertexInput input) {
     position = mul(position, g_scene.view);
     position = mul(position, g_scene.projection);
 
-    output.position = position;
     output.color = input.color;
+    output.position = position;
     output.normal = normalize(mul(float4(input.normal, 0.0), g_push_constant.model).xyz);;
     output.uv = float2(input.uv_x, input.uv_y);
 
@@ -61,6 +59,9 @@ VertexOutput main_vert(VertexInput input) {
 
 [shader("fragment")]
 float4 main_frag(VertexOutput frag) : SV_Target {
+    if (WIREFRAME)
+        return float4(0.9f, 0.9f, 0.9f, 1.0f);
+    
     float power = g_scene.sun_direction.w;
     float3 normal = normalize(frag.normal);
     float3 light_dir = normalize(-g_scene.sun_direction.xyz);

@@ -289,8 +289,6 @@ void Renderer::RecordCommands(const FrameContext &frame) {
     const VkExtent3D extent = swapchain_image.Extent();
 
     cmd.Begin();
-    cmd.BeginLabel("Drawing to image", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-    {
         std::vector<ImageAttachment> attachments {};
         attachments.push_back({
             .type = AttachmentType::Color,
@@ -300,24 +298,32 @@ void Renderer::RecordCommands(const FrameContext &frame) {
         });
         attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
 
+        cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
+        cmd.BindVertexBuffer(m_vertex_buffer->Buffer());
+        cmd.BindIndexBuffer(m_index_buffer->Buffer());
+
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
+
+        cmd.BindDescriptorSet(0, *m_triangle_pipeline, frame.descriptor_set);
+
+        cmd.BeginLabel("Cube Render", glm::vec4(0.2f, 0.2f, 0.5f, 1.0f));
         cmd.BeginRendering(attachments);
             cmd.BindPipeline(*m_triangle_pipeline);
-            cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
-
-            cmd.BindDescriptorSet(0, *m_triangle_pipeline, frame.descriptor_set);
             cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT, m_push_constant);
-
-            cmd.BindVertexBuffer(m_vertex_buffer->Buffer());
-            cmd.BindIndexBuffer(m_index_buffer->Buffer());
-
             cmd.DrawIndexed(static_cast<uint32_t>(m_index_buffer->Size() / sizeof(uint32_t)));
         cmd.EndRendering();
-    }
+
+        attachments[0].should_clear = false;
+        cmd.BeginLabel("Wireframe Render", glm::vec4(0.4f, 0.4f, 0.4f, 1.0f));
+        cmd.BeginRendering(attachments);
+            cmd.BindPipeline(*m_wireframe_pipeline);
+            cmd.DrawIndexed(static_cast<uint32_t>(m_index_buffer->Size() / sizeof(uint32_t)));
+        cmd.EndRendering();
+        cmd.EndLabel();
     cmd.EndLabel();
 
-    cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+    cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
     {
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -366,6 +372,19 @@ void Renderer::CreateTrianglePipeline() {
         .size = sizeof(PushConstantData),
     };
 
+    VkSpecializationMapEntry entry_is_wireframe {
+        .constantID = 0,
+        .offset = offsetof(SpecializationConstantData, is_wireframe),
+        .size = sizeof(m_specialization_constant.is_wireframe)
+    };
+
+    VkSpecializationInfo specialization_info {
+        .mapEntryCount = 1,
+        .pMapEntries = &entry_is_wireframe,
+        .dataSize = sizeof(SpecializationConstantData),
+        .pData = &m_specialization_constant,
+    };
+
     Assert(m_triangle_shader, "Triangle shader was not compiled!");
 
     auto builder = VulkanPipeline::GraphicsBuilder(*m_device)
@@ -379,6 +398,7 @@ void Renderer::CreateTrianglePipeline() {
         
         .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .SetPolygonMode(VK_POLYGON_MODE_FILL)
+        .EnableCulling()
 
         .EnableDepthTest()
         .AddColorAttachment({
@@ -387,17 +407,27 @@ void Renderer::CreateTrianglePipeline() {
         })
         .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat())
         .AddPushConstant(range)
-        .AddDescriptorSetLayout(m_scene_layout);
+        .AddDescriptorSetLayout(m_scene_layout)
+        .SetSpecializationConstants(specialization_info);
 
     if (m_triangle_pipeline)
         builder.FromBase(m_triangle_pipeline->Pipeline());
 
+    m_specialization_constant.is_wireframe = false;
     m_triangle_pipeline = builder.Build();
+
+    builder.SetPolygonMode(VK_POLYGON_MODE_LINE)
+        .DisableDepthTest();
+    
+    m_specialization_constant.is_wireframe = true;
+    m_wireframe_pipeline = builder.Build();
+
     m_triangle_pipeline->SetDebugName("Triangle Pipeline");
 }
 
 void Renderer::DestroyTrianglePipeline() {
     m_triangle_pipeline.reset();
+    m_wireframe_pipeline.reset();
 }
 
 void Renderer::RecreateSwapChain() {

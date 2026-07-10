@@ -148,6 +148,13 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableDepthTest(VkCompareOp 
     return *this;
 }
 
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableDepthTest() {
+    m_depth_state.depth_test_enabled = VK_FALSE;
+    m_depth_state.depth_compare = VK_COMPARE_OP_NEVER;
+    m_depth_state.depth_write_enabled = VK_FALSE;
+    return *this;
+}
+
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableDepthWrite() {
     m_depth_state.depth_write_enabled = VK_FALSE;
     return *this;
@@ -281,6 +288,11 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddDescriptorSetLayout(const
     return *this;
 }
 
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetSpecializationConstants(VkSpecializationInfo &info) {
+    m_specialization_constants = &info;
+    return *this;
+}
+
 std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
     VkPipeline pipeline;
 
@@ -303,7 +315,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
             .stage = GetVulkanShaderStage(stage),
             .module = shader_modules[entry->module_name]->Handle(),
             .pName = entry->entry_name.c_str(),
-            .pSpecializationInfo = nullptr,
+            .pSpecializationInfo = m_specialization_constants,
         };
 
         shader_stages.push_back(create_info);
@@ -532,7 +544,6 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader
     return *this;
 }
 
-
 PipelineBuilder_Compute &PipelineBuilder_Compute::AddPushConstant(const VkPushConstantRange &range) {
     m_push_constants.push_back(range);
     return *this;
@@ -540,6 +551,11 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::AddPushConstant(const VkPushCo
 
 PipelineBuilder_Compute &PipelineBuilder_Compute::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
     m_descriptor_layouts.push_back(layout);
+    return *this;
+}
+
+PipelineBuilder_Compute &PipelineBuilder_Compute::SetSpecializationConstants(VkSpecializationInfo &info) {
+    m_specialization_constants = &info;
     return *this;
 }
 
@@ -552,6 +568,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
         .module = shader_module->Handle(),
         .pName = m_compute_shader.entry_name.c_str(),
+        .pSpecializationInfo = m_specialization_constants,
     };
 
     VkPipelineLayoutCreateInfo pipeline_layout_create_info {
@@ -678,6 +695,11 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDescriptorSetLayout(c
     return *this;
 }
 
+PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetSpecializationConstants(VkSpecializationInfo &info) {
+    m_specialization_constants = &info;
+    return *this;
+}
+
 std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
     Assert(!m_shader_entries.empty(), "Cannot create raytracing pipeline without shader stages!");
     Assert(!m_groups.empty(), "Cannot create raytracing pipeline without shader groups!");
@@ -701,7 +723,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
             .stage = GetVulkanShaderStage(entry.shader_stage),
             .module = shader_modules[entry.module_name]->Handle(),
             .pName = entry.entry_name.c_str(),
-            .pSpecializationInfo = nullptr,
+            .pSpecializationInfo = m_specialization_constants,
         });
     }
 

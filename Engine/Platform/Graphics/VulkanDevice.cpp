@@ -126,7 +126,7 @@ uint32_t VulkanDevice::QueueFamily(QueueType type) const {
     }
 }
 
-void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(VkCommandBuffer)> &record, bool async) const {
+void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(const CommandBuffer &)> &record, bool async) const {
     if (type == QueueType::Present)
         throw std::runtime_error("Cannot record present operations in a command buffer for immediate submit!");
 
@@ -145,21 +145,16 @@ void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(VkCo
         };
     }();
 
-    VK_CHECK(vkWaitForFences(m_device, 1, &context.fence, VK_TRUE, ImmediateFenceMaxTimeout * 1'000'000));
-    VK_CHECK(vkResetCommandPool(m_device, context.command_pool, 0));
+    context.fence->Wait();
+    context.command_pool->Reset();
 
-    struct VkCommandBufferBeginInfo begin_info {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-
-    VK_CHECK(vkBeginCommandBuffer(context.command_buffer, &begin_info));
-    record(context.command_buffer);
-    VK_CHECK(vkEndCommandBuffer(context.command_buffer));
+    context.command_buffer->Begin();
+    record(*context.command_buffer);
+    context.command_buffer->End();
 
     VkCommandBufferSubmitInfo command_submit_info {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = context.command_buffer,
+        .commandBuffer = context.command_buffer->Handle(),
     };
 
     VkSubmitInfo2 submit_info {
@@ -168,11 +163,11 @@ void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(VkCo
         .pCommandBufferInfos = &command_submit_info,
     };
 
-    VK_CHECK(vkResetFences(m_device, 1, &context.fence));
-    VK_CHECK(vkQueueSubmit2(Queue(type), 1, &submit_info, context.fence));
+    context.fence->Reset();
+    VK_CHECK(vkQueueSubmit2(Queue(type), 1, &submit_info, context.fence->Handle()));
 
     if (!async) {
-        VK_CHECK(vkWaitForFences(m_device, 1, &context.fence, VK_TRUE, ImmediateFenceMaxTimeout * 1'000'000));
+        context.fence->Wait();
     }
 }
 
@@ -398,6 +393,8 @@ void VulkanDevice::CreateVulkanDevice() {
     std::vector<std::string> requested_extensions;
     requested_extensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     requested_extensions.emplace_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    requested_extensions.emplace_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    requested_extensions.emplace_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 
     m_physical_device = ChoosePhysicalDevice();
 
@@ -443,8 +440,15 @@ void VulkanDevice::CreateVulkanDevice() {
     VkPhysicalDeviceFeatures2 feat10 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .features = {
+            .depthBiasClamp = VK_TRUE,
             .fillModeNonSolid = VK_TRUE,
         }
+    };
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .accelerationStructure = VK_TRUE,
+        .descriptorBindingAccelerationStructureUpdateAfterBind = VK_TRUE,
     };
 
     VkPhysicalDeviceVulkan11Features feat11 = {
@@ -455,6 +459,17 @@ void VulkanDevice::CreateVulkanDevice() {
     VkPhysicalDeviceVulkan12Features feat12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .descriptorIndexing = VK_TRUE,
+
+        // bindless
+        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+        .shaderStorageImageArrayNonUniformIndexing = VK_TRUE,
+
+        .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+        .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,
+
+        .descriptorBindingPartiallyBound = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
+
         .bufferDeviceAddress = VK_TRUE,
     };
 
@@ -469,6 +484,7 @@ void VulkanDevice::CreateVulkanDevice() {
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat10));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat11));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat12));
+    feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&acceleration_structure_features));
     feature_chain.emplace_back(reinterpret_cast<VkBaseOutStructure *>(&feat13));
 
     // Connect feature linked list
@@ -546,32 +562,16 @@ void VulkanDevice::CreateImmediateObjects() {
         }
 
         // Create command pool
-        VkCommandPoolCreateInfo pool_create_info {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-            .queueFamilyIndex = QueueFamily(type),
-        };
-        VK_CHECK(vkCreateCommandPool(m_device, &pool_create_info, nullptr, &context.command_pool));
-        SetDebugName(context.command_pool, std::format("Immediate {} Command Pool", type_name));
+        context.command_pool = CreateCommandPool(type, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+        context.command_pool->SetDebugName(std::format("Immediate {} Command Pool", type_name));
 
         // Allocate command buffer
-        VkCommandBufferAllocateInfo allocate_info {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = context.command_pool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-
-        VK_CHECK(vkAllocateCommandBuffers(m_device, &allocate_info, &context.command_buffer));
-        SetDebugName(context.command_buffer, std::format("Immediate {} Command Buffer", type_name));
+        context.command_buffer = context.command_pool->AllocateCommandBuffer();
+        context.command_buffer->SetDebugName(std::format("Immediate {} Command Buffer", type_name));
 
         // Create fence
-        VkFenceCreateInfo fence_create_info {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-        };
-        VK_CHECK(vkCreateFence(m_device, &fence_create_info, nullptr, &context.fence));
-        SetDebugName(context.command_buffer, std::format("Immediate {} Fence", type_name));
+        context.fence = CreateFence();
+        context.fence->SetDebugName(std::format("Immediate {} Fence", type_name));
     };
 
     create_immediate_object(QueueType::Graphics, m_immediate_graphics);
@@ -580,14 +580,17 @@ void VulkanDevice::CreateImmediateObjects() {
 }
 
 void VulkanDevice::DestroyImmediateObjects() {
-    vkDestroyCommandPool(m_device, m_immediate_graphics.command_pool, nullptr);
-    vkDestroyFence(m_device, m_immediate_graphics.fence, nullptr);
+    m_immediate_graphics.command_buffer.reset();
+    m_immediate_graphics.command_pool.reset();
+    m_immediate_graphics.fence.reset();
 
-    vkDestroyCommandPool(m_device, m_immediate_compute.command_pool, nullptr);
-    vkDestroyFence(m_device, m_immediate_compute.fence, nullptr);
+    m_immediate_compute.command_buffer.reset();
+    m_immediate_compute.command_pool.reset();
+    m_immediate_compute.fence.reset();
 
-    vkDestroyCommandPool(m_device, m_immediate_transfer.command_pool, nullptr);
-    vkDestroyFence(m_device, m_immediate_transfer.fence, nullptr);
+    m_immediate_transfer.command_buffer.reset();
+    m_immediate_transfer.command_pool.reset();
+    m_immediate_transfer.fence.reset();
 }
 
 VkPhysicalDevice VulkanDevice::ChoosePhysicalDevice() {

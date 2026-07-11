@@ -118,26 +118,39 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetPatchControlPoints(uint32
 }
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::EnableCulling(VkCullModeFlags cull_mode) {
-    m_rasterization_state.cull_mode = cull_mode;
+    m_rasterization_state_create_info.cullMode = cull_mode;
     return *this;
 }
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetFrontFace(VkFrontFace front_face) {
-    m_rasterization_state.front_face = front_face;
+    m_rasterization_state_create_info.frontFace = front_face;
     return *this;
 }
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableCulling() {
-    m_rasterization_state.cull_mode = VK_CULL_MODE_NONE;
+    m_rasterization_state_create_info.cullMode = VK_CULL_MODE_NONE;
     return *this;
 }
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetPolygonMode(VkPolygonMode polygon_mode) {
-    m_rasterization_state.polygon_mode = polygon_mode;
+    m_rasterization_state_create_info.polygonMode = polygon_mode;
     return *this;
 }
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetLineWidth(float width) {
-    m_rasterization_state.line_width = width;
+    m_rasterization_state_create_info.lineWidth = width;
+    return *this;
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetDepthBias(float constant, float clamp, float slope) {
+    m_rasterization_state_create_info.depthBiasEnable = VK_TRUE;
+    m_rasterization_state_create_info.depthBiasConstantFactor = constant;
+    m_rasterization_state_create_info.depthBiasClamp = clamp;
+    m_rasterization_state_create_info.depthBiasSlopeFactor = slope;
+    return *this;
+}
+
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::DisableDepthBias() {
+    m_rasterization_state_create_info.depthBiasEnable = VK_FALSE;
     return *this;
 }
 
@@ -369,17 +382,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
         .scissorCount = 1,
     };
 
-    //// Rasterizer ////
-    VkPipelineRasterizationStateCreateInfo rasterization_state_create_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .depthClampEnable = VK_FALSE,
-        .rasterizerDiscardEnable = m_rasterization_state.discard_all,
-        .polygonMode = m_rasterization_state.polygon_mode,
-        .cullMode = m_rasterization_state.cull_mode,
-        .frontFace = m_rasterization_state.front_face,
-        .lineWidth = m_rasterization_state.line_width,
-    };
+    //// Rasterization State ////
 
     //// Multisampling ////
     VkPipelineMultisampleStateCreateInfo multisample_state_create_info {
@@ -464,7 +467,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
         .pInputAssemblyState = &input_assembly_create_info,
         .pTessellationState = has_tessellation_stage ? &tessellation_state_create_info : nullptr,
         .pViewportState = &viewport_state_create_info,
-        .pRasterizationState = &rasterization_state_create_info,
+        .pRasterizationState = &m_rasterization_state_create_info,
         .pMultisampleState = &multisample_state_create_info,
         .pDepthStencilState = &depth_stencil_state_create_info,
         .pColorBlendState = &color_blend_state_create_info,

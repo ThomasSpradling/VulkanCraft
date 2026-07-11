@@ -11,7 +11,7 @@ struct DescriptorPoolRatios {
 
 class DescriptorAllocator : public NonCopyable, public NonMovable {
 public:
-    DescriptorAllocator(const VulkanDevice &device, uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios);
+    DescriptorAllocator(const VulkanDevice &device, uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios, VkDescriptorPoolCreateFlags flags);
     ~DescriptorAllocator();
     
     VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout);
@@ -22,6 +22,7 @@ private:
     std::vector<DescriptorPoolRatios> m_ratios;
     uint32_t m_sets_per_pool;
     const uint32_t MAX_SETS_PER_POOL = 4096u;
+    VkDescriptorPoolCreateFlags m_pool_flags = 0;
 
     std::vector<VkDescriptorPool> m_full_pools;
     std::vector<VkDescriptorPool> m_ready_pools;

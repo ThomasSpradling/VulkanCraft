@@ -53,6 +53,12 @@ public:
     void Resize(VkDeviceSize size);
 
     void Upload(const void *data, VkDeviceSize bytes, VkDeviceSize offset = 0ull);
+    
+    // Upload data to index, viewing this buffer as an array<T>
+    template <typename T>
+    void Upload(const T *data, uint32_t index) {
+        Upload(data, sizeof(T), sizeof(T) * index);
+    }
 
     template <typename T>
     void Upload(const std::vector<T> &data, VkDeviceSize buffer_offset = 0) {

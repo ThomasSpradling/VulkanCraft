@@ -63,6 +63,7 @@ ImageBarrier &ImageBarrier::TransitionLayout(VkImageLayout new_layout) {
 
 ImageBarrier &ImageBarrier::SubresourceRange(const VkImageSubresourceRange &subresource) {
     m_subresource = subresource;
+    m_default_subresource = false;
     return *this;
 }
 
@@ -80,6 +81,17 @@ void ImageBarrier::Execute() {
 
     if (m_dst_access == 0)
         m_dst_access = InferAccessFlags(m_new_layout, m_generated_dst_access);
+
+    if (m_default_subresource) {
+        m_subresource.aspectMask = GetFormatAspect(m_image.Format());
+        m_subresource.baseArrayLayer = 0;
+        m_subresource.layerCount = m_image.ArrayLayers();
+        m_subresource.baseMipLevel = 0;
+        m_subresource.levelCount = m_image.MipLevels();
+        m_image.m_layout = m_new_layout;
+    } else {
+        m_image.m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
 
     VkImageMemoryBarrier2 barrier {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -102,8 +114,6 @@ void ImageBarrier::Execute() {
     };
 
     vkCmdPipelineBarrier2(m_cmd, &dependency);
-
-    m_image.m_layout = m_new_layout;
 }
 
 // ======================== //
@@ -385,7 +395,8 @@ void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout image_lay
         .Execute();
 }
 
-void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer) {
+void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer) const {
+    Assert(image.MipLevels() > 1, "Should not generate mipmaps with just one mip level.");
     Assert(image.SampleCount() == 1u, "Cannot generate mipmaps for multi-sampled image!");
     Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
     
@@ -456,11 +467,13 @@ void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_
             .filter = filter,
         };
         vkCmdBlitImage2(m_command_buffer, &blit_image_info);
+
+        TransitionLayout(image, old_layout, VkImageSubresourceRange {
+            .aspectMask = aspect,
+            .baseMipLevel = level,
+            .levelCount = 1,
+            .baseArrayLayer = layer,
+            .layerCount = 1,
+        });
     }
-    
-    TransitionLayout(image, old_layout, VkImageSubresourceRange {
-        .aspectMask = aspect,
-        .baseArrayLayer = layer,
-        .layerCount = 1,
-    });
 }

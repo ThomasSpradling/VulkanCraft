@@ -81,7 +81,7 @@ add_subdirectory(third_party SYSTEM)
 
 # -- CLANG TIDY -- #
 
-option(ENABLE_CLANG_TIDY "Run clang-tidy." ON)
+option(ENABLE_CLANG_TIDY "Run clang-tidy." OFF)
 
 if(ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)

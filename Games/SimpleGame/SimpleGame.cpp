@@ -2,7 +2,7 @@
 #include <iostream>
 
 void SimpleGame::Initialize(ClientContext &context) {
-    context.renderer.EnableVSync();
+    // context.renderer.EnableVSync();
 
     m_camera = &context.renderer.GetCamera();
     m_camera->SetViewDirection(glm::vec3(0.0f, 0.0f, -1.0f));
@@ -59,6 +59,9 @@ void SimpleGame::HandleInputs(double delta_time, InputHandler &input_handler) {
         move_direction -= forward;
     if (input_handler.IsKeyDown(GLFW_KEY_D))
         move_direction += right;
+
+    if (glm::dot(move_direction, move_direction) > 0.0f)
+        move_direction = glm::normalize(move_direction);
 
     m_player.position += move_direction * PlayerSpeed * static_cast<float>(delta_time) / 1000.0f;
     m_player.view_direction = forward;

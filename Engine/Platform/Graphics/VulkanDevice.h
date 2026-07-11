@@ -80,7 +80,7 @@ public:
 
     // Immediately submits recorded commands in the specified queue. If `async` is turned on,
     // this function will not wait for submission to be complete.
-    void ImmediateSubmit(QueueType type, const std::function<void(VkCommandBuffer)> &record, bool async = false) const;
+    void ImmediateSubmit(QueueType type, const std::function<void(const CommandBuffer &)> &record, bool async = false) const;
     void QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence);
 public:
     std::unique_ptr<ShaderModule> CreateShaderModule(const std::vector<uint32_t> &spriv_code) const;
@@ -132,9 +132,9 @@ private:
 
     struct ImmediateContext {
         VkQueue queue = VK_NULL_HANDLE;
-        VkCommandPool command_pool = VK_NULL_HANDLE;
-        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
-        VkFence fence = VK_NULL_HANDLE;
+        std::unique_ptr<VulkanCommandPool> command_pool;
+        std::unique_ptr<CommandBuffer> command_buffer;
+        std::unique_ptr<VulkanFence> fence;
     };
 
     struct ImageFormats {

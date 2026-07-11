@@ -62,6 +62,8 @@ public:
 
     PipelineBuilder_Graphics &SetPolygonMode(VkPolygonMode polygon_mode = VK_POLYGON_MODE_FILL);
     PipelineBuilder_Graphics &SetLineWidth(float width);
+    PipelineBuilder_Graphics &SetDepthBias(float constant, float clamp, float slope);
+    PipelineBuilder_Graphics &DisableDepthBias();
 
     PipelineBuilder_Graphics &EnableDepthTest(VkCompareOp compare_op = VK_COMPARE_OP_LESS);
     PipelineBuilder_Graphics &DisableDepthTest();
@@ -110,13 +112,10 @@ private:
 
     std::optional<uint32_t> m_patch_control_points = std::nullopt;
 
-    struct RasterizationState {
-        VkBool32 discard_all = VK_FALSE;
-        VkPolygonMode polygon_mode = VK_POLYGON_MODE_FILL;
-        VkCullModeFlags cull_mode = VK_CULL_MODE_NONE;
-        VkFrontFace front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        float line_width = 1.0f;
-    } m_rasterization_state;
+    VkPipelineRasterizationStateCreateInfo m_rasterization_state_create_info = VkPipelineRasterizationStateCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .lineWidth = 1.0f,
+    };
 
     struct MultisampleState {
         VkSampleCountFlagBits sample_count = VK_SAMPLE_COUNT_1_BIT;

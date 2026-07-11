@@ -9,7 +9,7 @@
 #include <vector>
 #include "VulkanBuffer.h"
 
-constexpr uint32_t MaxMipmaps = std::numeric_limits<uint32_t>::max();
+constexpr uint32_t AutoComputeMipLevels = std::numeric_limits<uint32_t>::max();
 
 class VulkanImage;
 class VulkanImageBuilder {
@@ -29,9 +29,9 @@ public:
     VulkanImageBuilder &ColorAttachment(bool hdr = false);
 
     VulkanImageBuilder &Format(VkFormat format);
-    VulkanImageBuilder &MipMapLevels(uint32_t levels = MaxMipmaps);
+    VulkanImageBuilder &MipMapLevels(uint32_t levels = AutoComputeMipLevels);
     inline VulkanImageBuilder &MipMaps() {
-        return MipMapLevels(MaxMipmaps);
+        return MipMapLevels(AutoComputeMipLevels);
     }
 
     VulkanImageBuilder &LayersCount(uint32_t layers);
@@ -103,8 +103,10 @@ public:
 
     VkImageUsageFlags Usage() const { return m_usage; }
 
-    void Upload(const void *data, VkDeviceSize bytes, VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED);
-    void UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer, VkImageLayout image_layout = VK_IMAGE_LAYOUT_UNDEFINED);
+    void Upload(const void *data, VkDeviceSize bytes);
+    void UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer);
+
+    void TransitionLayout(VkImageLayout layout);
 private:
     const VulkanDevice &m_device;
 private:
@@ -133,5 +135,5 @@ private:
     VmaAllocationCreateFlags m_memory_flags = 0;
     std::span<uint32_t> m_queue_families {};
 private:
-    void UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count, VkImageLayout image_layout);
+    void UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count);
 };

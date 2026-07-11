@@ -1,4 +1,6 @@
 #include "Renderer.h"
+#include "Common.h"
+#include "GPUResourceManager.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/DescriptorLayoutBuilder.h"
@@ -28,6 +30,7 @@ Renderer::Renderer(const Window &window)
 
     std::filesystem::path path(ASSET_PATH "/shaders");
     m_shader_compiler = std::make_unique<ShaderCompiler>(path);
+    m_resource_manager = std::make_unique<GPUResourceManager>(*m_device);
 
     CreateObjects();
 }
@@ -37,6 +40,7 @@ Renderer::~Renderer() {
 
     DestroyObjects();
 
+    m_resource_manager.reset();
     m_swapchain.reset();
     m_device.reset();
 }
@@ -104,15 +108,6 @@ void Renderer::DrawFrame() {
 }
 
 void Renderer::CreateObjects() {
-    std::vector<DescriptorPoolRatios> ratios = {
-        { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .ratio = 1.0f }
-    };
-    m_descriptor_allocator = std::make_unique<DescriptorAllocator>(*m_device, 10, ratios);
-
-    m_scene_layout = DescriptorLayoutBuilder(*m_device)
-        .AddBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .Build(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-
     m_frame_data.resize(MaxFramesInFlight);
     for (uint32_t i = 0; i < MaxFramesInFlight; ++i) {
         FrameContext &frame = m_frame_data[i];
@@ -130,35 +125,136 @@ void Renderer::CreateObjects() {
         frame.image_available->SetDebugName(std::format("Image Available Semaphore [{}]", i));
 
         frame.scene_uniform_buffer = VulkanBuffer::BufferBuilder()
-            .AddUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
             .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
             .Size(sizeof(SceneUniformData))
             .Build(*m_device);
 
-        frame.descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_scene_layout);
-        DescriptorWriter(*m_device)
-            .WriteBuffer(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {
-                .buffer = frame.scene_uniform_buffer->Buffer(),
-                .offset = 0,
-                .range = sizeof(SceneUniformData),
-            })
-            .Write(frame.descriptor_set);
+        m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
     }
 
-    m_triangle_shader = m_shader_compiler->Compile("triangle");
-    Assert(m_triangle_shader, "Failed to compile triangle shader!");
+    m_material_buffer = VulkanBuffer::BufferBuilder()
+        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+        .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+        .Size(sizeof(MaterialData) * MaxMaterialCount)
+        .Build(*m_device);
+    m_push_constant.material_buffer = m_material_buffer->DeviceAddress();
+
+    // Add some materials:
+
+    std::array<glm::u8vec4, 1> white_pixels{
+        glm::u8vec4(255, 255, 255, 255)
+    };
+
+    m_white_image = VulkanImage::ImageBuilder()
+        .Image2D(1, 1)
+        .Format(VK_FORMAT_R8G8B8A8_UNORM)
+        .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        .Build(*m_device);
+    m_white_image->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    m_white_image->Upload(white_pixels.data(), sizeof(glm::u8vec4) * white_pixels.size());
+
+    m_device->ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        cmd.ImageMemoryBarrier(*m_white_image)
+            .DestAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
+            .DestStage(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR)
+            .TransitionLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+            .Execute();
+    });
+    
+    TextureId white_id = m_resource_manager->AddTexture(*m_white_image);
+
+    std::array<glm::u8vec4, 25> checkerboard_pixels;
+    for (uint32_t y = 0; y < 5; ++y) {
+        for (uint32_t x = 0; x < 5; ++x) {
+            const bool white = ((x + y) % 2) == 0;
+
+            checkerboard_pixels[y * 5 + x] =
+                white
+                    ? glm::u8vec4(255, 255, 255, 255)
+                    : glm::u8vec4(0, 0, 0, 255);
+        }
+    }
+
+    m_checker_image = VulkanImage::ImageBuilder()
+        .Image2D(5, 5)
+        .Format(VK_FORMAT_R8G8B8A8_UNORM)
+        .MipMapLevels()
+        .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+        .Build(*m_device);
+    m_checker_image->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    m_checker_image->Upload(checkerboard_pixels.data(), sizeof(glm::u8vec4) * checkerboard_pixels.size());
+
+    m_device->ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        cmd.GenerateMipMaps(*m_checker_image, VK_FILTER_NEAREST);
+        cmd.ImageMemoryBarrier(*m_checker_image)
+            .DestAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
+            .DestStage(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR)
+            .TransitionLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+            .Execute();
+    });
+        
+    TextureId checker_id = m_resource_manager->AddTexture(*m_checker_image);
+
+    VkSamplerCreateInfo sampler_create_info {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+
+        .mipLodBias = 0.0f,
+        .anisotropyEnable = VK_FALSE,
+        .maxAnisotropy = 1.0f,
+
+        .compareEnable = VK_FALSE,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .unnormalizedCoordinates = VK_FALSE,
+    };
+    vkCreateSampler(m_device->Device(), &sampler_create_info, nullptr, &m_sampler);
+    SamplerId sampler_id = m_resource_manager->AddSampler(m_sampler);
+
+    MaterialData white_material {
+        .color_texture = white_id,
+        .color_sampler = sampler_id,
+        .base_color = glm::vec4(1.0f),
+    };
+
+    MaterialData red_material {
+        .color_texture = checker_id,
+        .color_sampler = sampler_id,
+        .base_color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+    };
+
+    // Upload them:
+    m_material_buffer->Upload<MaterialData>(&white_material, 0);
+    m_material_buffer->Upload<MaterialData>(&red_material, 1);
+
+    m_triangle_shader = m_shader_compiler->Compile("Mesh");
+    Assert(m_triangle_shader, "Failed to compile shader!");
 
     // Vertex buffers
     
     std::vector<MeshVertex> vertices;
     std::vector<uint32_t> indices;
 
-    const auto V = [](glm::vec3 position, glm::vec3 normal, glm::vec4 color) {
+    const auto V = [](glm::vec3 position, glm::vec2 uv, glm::vec3 normal, glm::vec4 color) {
         return MeshVertex {
             .position = position,
-            .uv_x = 0.0f,
+            .uv_x = uv.x,
             .normal = normal,
-            .uv_y = 0.0f,
+            .uv_y = uv.y,
             .color = color,
         };
     };
@@ -172,40 +268,40 @@ void Renderer::CreateObjects() {
 
     vertices = {
         // Front +Z
-        V({-0.5f, -0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, red),
-        V({ 0.5f, -0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, red),
-        V({ 0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, red),
-        V({-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, red),
+        V({-0.5f, -0.5f,  0.5f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, red),
+        V({ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, red),
+        V({ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, red),
+        V({-0.5f,  0.5f,  0.5f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, red),
 
         // Back -Z
-        V({ 0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, green),
-        V({-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, green),
-        V({-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, green),
-        V({ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, green),
+        V({ 0.5f, -0.5f, -0.5f}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, green),
+        V({-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, green),
+        V({-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f}, green),
+        V({ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f}, green),
 
         // Right +X
-        V({ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, blue),
-        V({ 0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, blue),
-        V({ 0.5f,  0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, blue),
-        V({ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, blue),
+        V({ 0.5f, -0.5f,  0.5f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, blue),
+        V({ 0.5f, -0.5f, -0.5f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, blue),
+        V({ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, blue),
+        V({ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, blue),
 
         // Left -X
-        V({-0.5f, -0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, yellow),
-        V({-0.5f, -0.5f,  0.5f}, {-1.0f, 0.0f, 0.0f}, yellow),
-        V({-0.5f,  0.5f,  0.5f}, {-1.0f, 0.0f, 0.0f}, yellow),
-        V({-0.5f,  0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, yellow),
+        V({-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, yellow),
+        V({-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, yellow),
+        V({-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f}, yellow),
+        V({-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f}, yellow),
 
         // Top +Y
-        V({-0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, magenta),
-        V({ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, magenta),
-        V({ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, magenta),
-        V({-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, magenta),
+        V({-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, magenta),
+        V({ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, magenta),
+        V({ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, magenta),
+        V({-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, magenta),
 
         // Bottom -Y
-        V({-0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, cyan),
-        V({ 0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, cyan),
-        V({ 0.5f, -0.5f,  0.5f}, {0.0f, -1.0f, 0.0f}, cyan),
-        V({-0.5f, -0.5f,  0.5f}, {0.0f, -1.0f, 0.0f}, cyan),
+        V({-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, cyan),
+        V({ 0.5f, -0.5f, -0.5f}, {1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, cyan),
+        V({ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f}, {0.0f, -1.0f, 0.0f}, cyan),
+        V({-0.5f, -0.5f,  0.5f}, {0.0f, 1.0f}, {0.0f, -1.0f, 0.0f}, cyan),
     };
 
     indices = {
@@ -218,7 +314,7 @@ void Renderer::CreateObjects() {
     };
 
     m_vertex_buffer = VulkanBuffer::BufferBuilder()
-        .AddUsage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
         .Size(sizeof(MeshVertex) * vertices.size())
         .Build(*m_device);
@@ -231,6 +327,8 @@ void Renderer::CreateObjects() {
     m_vertex_buffer->Upload(vertices);
     m_index_buffer->Upload(indices);
 
+    m_push_constant.vertex_buffer = m_vertex_buffer->DeviceAddress();
+
     CreateTrianglePipeline();
     CreateSwapChainObjects();
 }
@@ -239,19 +337,18 @@ void Renderer::DestroyObjects() {
     if (m_device)
         vkDeviceWaitIdle(m_device->Device());
 
-    if (m_scene_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device->Device(), m_scene_layout, nullptr);
-        m_scene_layout = VK_NULL_HANDLE;
-    }
+    vkDestroySampler(m_device->Device(), m_sampler, nullptr);
+    m_checker_image.reset();
+    m_white_image.reset();
 
     m_vertex_buffer.reset();
     m_index_buffer.reset();
+    m_material_buffer.reset();
 
     DestroyTrianglePipeline();
     DestroySwapChainObjects();
 
     m_frame_data.clear();
-    m_descriptor_allocator.reset();
 }
 
 void Renderer::UpdateSceneData() {
@@ -265,6 +362,7 @@ void Renderer::UpdateSceneData() {
     data->view = m_camera.ComputeViewMatrix();
     data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
     data->ambient = 0.1f;
+    m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
 
     using Clock = std::chrono::steady_clock;
 
@@ -278,6 +376,10 @@ void Renderer::UpdateSceneData() {
         time_seconds * glm::radians(90.0f),
         glm::normalize(glm::vec3(0.35f, 1.0f, 0.2f))
     );
+
+    float integer;
+    float decimal = std::modf(time_seconds, &integer);
+    m_push_constant.material_id = (decimal < 0.5f) ? 0 : 1;
 }
 
 void Renderer::RecordCommands(const FrameContext &frame) {
@@ -299,20 +401,21 @@ void Renderer::RecordCommands(const FrameContext &frame) {
         attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
 
         cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
-        cmd.BindVertexBuffer(m_vertex_buffer->Buffer());
+        // cmd.BindVertexBuffer(m_vertex_buffer->Buffer());
         cmd.BindIndexBuffer(m_index_buffer->Buffer());
 
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
 
-        cmd.BindDescriptorSet(0, *m_triangle_pipeline, frame.descriptor_set);
+        cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_resource_manager->GlobalDescriptorSet());
 
         cmd.BeginLabel("Cube Render", glm::vec4(0.2f, 0.2f, 0.5f, 1.0f));
         cmd.BeginRendering(attachments);
             cmd.BindPipeline(*m_triangle_pipeline);
-            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT, m_push_constant);
+            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
             cmd.DrawIndexed(static_cast<uint32_t>(m_index_buffer->Size() / sizeof(uint32_t)));
         cmd.EndRendering();
+        cmd.EndLabel();
 
         attachments[0].should_clear = false;
         cmd.BeginLabel("Wireframe Render", glm::vec4(0.4f, 0.4f, 0.4f, 1.0f));
@@ -321,18 +424,15 @@ void Renderer::RecordCommands(const FrameContext &frame) {
             cmd.DrawIndexed(static_cast<uint32_t>(m_index_buffer->Size() / sizeof(uint32_t)));
         cmd.EndRendering();
         cmd.EndLabel();
-    cmd.EndLabel();
 
-    cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
-    {
+        cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         cmd.CopyImage(*context.draw_image, swapchain_image);
 
         cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    }
-    cmd.EndLabel();
+        cmd.EndLabel();
     cmd.End();
 }
 
@@ -367,7 +467,7 @@ void Renderer::DestroySwapChainObjects() {
 
 void Renderer::CreateTrianglePipeline() {
     VkPushConstantRange range {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = sizeof(PushConstantData),
     };
@@ -389,12 +489,12 @@ void Renderer::CreateTrianglePipeline() {
 
     auto builder = VulkanPipeline::GraphicsBuilder(*m_device)
         .AddShader(*m_triangle_shader)
-        .AddBinding(0, sizeof(MeshVertex))
-        .AddAttribute(0, 0, DataFormat::Float3, offsetof(MeshVertex, position))
-        .AddAttribute(1, 0, DataFormat::Float, offsetof(MeshVertex, uv_x))
-        .AddAttribute(2, 0, DataFormat::Float3, offsetof(MeshVertex, normal))
-        .AddAttribute(3, 0, DataFormat::Float, offsetof(MeshVertex, uv_y))
-        .AddAttribute(4, 0, DataFormat::Float4, offsetof(MeshVertex, color))
+        // .AddBinding(0, sizeof(MeshVertex))
+        // .AddAttribute(0, 0, DataFormat::Float3, offsetof(MeshVertex, position))
+        // .AddAttribute(1, 0, DataFormat::Float, offsetof(MeshVertex, uv_x))
+        // .AddAttribute(2, 0, DataFormat::Float3, offsetof(MeshVertex, normal))
+        // .AddAttribute(3, 0, DataFormat::Float, offsetof(MeshVertex, uv_y))
+        // .AddAttribute(4, 0, DataFormat::Float4, offsetof(MeshVertex, color))
         
         .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .SetPolygonMode(VK_POLYGON_MODE_FILL)
@@ -407,7 +507,7 @@ void Renderer::CreateTrianglePipeline() {
         })
         .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat())
         .AddPushConstant(range)
-        .AddDescriptorSetLayout(m_scene_layout)
+        .AddDescriptorSetLayout(m_resource_manager->GlobalDescriptorLayout())
         .SetSpecializationConstants(specialization_info);
 
     if (m_triangle_pipeline)
@@ -417,7 +517,8 @@ void Renderer::CreateTrianglePipeline() {
     m_triangle_pipeline = builder.Build();
 
     builder.SetPolygonMode(VK_POLYGON_MODE_LINE)
-        .DisableDepthTest();
+        .DisableDepthTest()
+        .SetDepthBias(0.0f, -1.0f, 0.0f);
     
     m_specialization_constant.is_wireframe = true;
     m_wireframe_pipeline = builder.Build();

@@ -44,6 +44,7 @@ private:
 
     VkImageLayout m_new_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageSubresourceRange m_subresource {};
+    bool m_default_subresource = true;
 };
 
 
@@ -123,7 +124,7 @@ public:
     void TransitionLayout(VulkanImage &image, VkImageLayout layout) const;
     void TransitionLayout(VulkanImage &image, VkImageLayout layout, const VkImageSubresourceRange &range) const;
 
-    void GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer = 0);
+    void GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer = 0) const;
 private:
     const VulkanCommandPool &m_command_pool;
     VkCommandBuffer m_command_buffer = VK_NULL_HANDLE;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <format>
 #include <memory>
+#include "CommandBuffer.h"
 
 // ============================== //
 // ---- Vulkan Image Builder ---- //
@@ -111,7 +112,9 @@ VulkanImageBuilder &VulkanImageBuilder::SharedQueueFamilies(std::span<uint32_t> 
 std::unique_ptr<VulkanImage> VulkanImageBuilder::Build(const VulkanDevice &device) {
     VkSharingMode sharing_mode = m_queue_families.size() >= 2 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     
-    if (m_mip_levels == MaxMipmaps) {
+    Assert(m_format, "Image must have a format!");
+
+    if (m_mip_levels == AutoComputeMipLevels) {
         m_mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max({m_extent.width, m_extent.height, m_extent.depth})))) + 1;
     }
     
@@ -260,33 +263,41 @@ VkImageView VulkanImage::CreateImageView(VkImageSubresourceRange subresource_ran
     return image_view;
 }
 
-void VulkanImage::Upload(const void *data, VkDeviceSize bytes, VkImageLayout image_layout) {
-    UploadLayers(data, bytes, 0, m_array_layers, image_layout);
+void VulkanImage::Upload(const void *data, VkDeviceSize bytes) {
+    UploadLayers(data, bytes, 0, m_array_layers);
 }
 
-void VulkanImage::UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer, VkImageLayout image_layout) {
-    UploadLayers(data, bytes, layer, 1, image_layout);
+void VulkanImage::UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer) {
+    UploadLayers(data, bytes, layer, 1);
 }
 
-void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count, VkImageLayout image_layout) {
+void VulkanImage::TransitionLayout(VkImageLayout layout) {
+    m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        cmd.TransitionLayout(*this, layout);
+    });
+}
+
+void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count) {
     VkDeviceSize source_bytes = GetBytesPerPixel(m_format) * m_extent.width * m_extent.height * m_extent.depth * layer_count;
     Assert(bytes == source_bytes, std::format("Non-matching sizes! Source data was {} bytes, but target data was"
         "[{} x {} x {}] x {} bytes x {} layers = {} bytes!", 
         bytes, m_extent.width, m_extent.height, m_extent.depth,
         GetBytesPerPixel(m_format), layer_count, source_bytes));
 
-    if (image_layout == VK_IMAGE_LAYOUT_UNDEFINED)
-        image_layout = m_layout;
+    Assert(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        || m_layout == VK_IMAGE_LAYOUT_GENERAL
+        || m_layout == VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR, "Cannot upload image unless layout is either TRANSFER_DST, GENERAL, or SHARED_PRESENT.");
 
     auto staging_buffer = VulkanBuffer::BufferBuilder()
         .AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+        .Size(bytes)
         .Build(m_device);
 
     std::memcpy(staging_buffer->Mapped(), data, bytes);
 
-    m_device.ImmediateSubmit(QueueType::Graphics, [&](VkCommandBuffer cmd) {
+    m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
         VkBufferImageCopy copy_region {
             .imageSubresource = {
                 .aspectMask = GetFormatAspect(m_format),
@@ -297,7 +308,6 @@ void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t la
             .imageOffset = VkOffset3D { .x = 0, .y = 0, .z = 0 },
             .imageExtent = m_extent,
         };
-        vkCmdCopyBufferToImage(cmd, staging_buffer->Buffer(), m_image, image_layout, 1, &copy_region);
+        vkCmdCopyBufferToImage(cmd.Handle(), staging_buffer->Buffer(), m_image, m_layout, 1, &copy_region);
     });
-    m_layout = image_layout;
 }

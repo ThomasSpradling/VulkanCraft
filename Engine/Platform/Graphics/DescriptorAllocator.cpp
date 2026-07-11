@@ -4,9 +4,10 @@
 #include <cmath>
 #include <volk.h>
 
-DescriptorAllocator::DescriptorAllocator(const VulkanDevice &device, uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios)
+DescriptorAllocator::DescriptorAllocator(const VulkanDevice &device, uint32_t max_sets, const std::vector<DescriptorPoolRatios> &ratios, VkDescriptorPoolCreateFlags flags)
     : m_device(device)
     , m_ratios(ratios)
+    , m_pool_flags(flags)
 {
     m_sets_per_pool = max_sets;
     VkDescriptorPool pool = CreateDescriptorPool();
@@ -69,6 +70,7 @@ VkDescriptorPool DescriptorAllocator::CreateDescriptorPool() {
     VkDescriptorPoolCreateInfo descriptor_pool_create_info {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .pNext = nullptr,
+        .flags = m_pool_flags,
         .maxSets = m_sets_per_pool,
         .poolSizeCount = static_cast<uint32_t>(sizes.size()),
         .pPoolSizes = sizes.data(),

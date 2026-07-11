@@ -3,6 +3,7 @@
 #include "Camera.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
+#include "GPUResourceManager.h"
 #include "Platform/Graphics/DescriptorAllocator.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
@@ -40,7 +41,7 @@ private:
         std::unique_ptr<VulkanFence> graphics_submit_fence;
         std::unique_ptr<VulkanSemaphore> image_available;
 
-        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+        // VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
         std::unique_ptr<VulkanBuffer> scene_uniform_buffer;
     };
     
@@ -60,13 +61,26 @@ private:
 
     struct PushConstantData {
         glm::mat4 model;
+        VkDeviceAddress vertex_buffer;
+        VkDeviceAddress scene_data_buffer;
+        VkDeviceAddress material_buffer;
+
+        uint32_t material_id = 0;
     };
 
     struct SpecializationConstantData {
         VkBool32 is_wireframe = false;
     };
+
+    struct alignas(16) MaterialData {
+        TextureId color_texture;
+        SamplerId color_sampler;
+        glm::vec2 pad_;
+
+        glm::vec4 base_color;
+    };
 private:
-    static constexpr uint32_t MaxFramesInFlight = 2;
+    static constexpr uint32_t MaxFramesInFlight = 3;
     const Window &m_window;
 
     std::unique_ptr<VulkanDevice> m_device = nullptr;
@@ -81,8 +95,7 @@ private:
     bool m_enable_vsync = false;
 
     // App specific data
-    std::unique_ptr<DescriptorAllocator> m_descriptor_allocator;
-    VkDescriptorSetLayout m_scene_layout = VK_NULL_HANDLE;
+    std::unique_ptr<GPUResourceManager> m_resource_manager;
 
     std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
     std::unique_ptr<VulkanPipeline> m_wireframe_pipeline;
@@ -92,10 +105,18 @@ private:
     std::unique_ptr<VulkanBuffer> m_vertex_buffer;
     std::unique_ptr<VulkanBuffer> m_index_buffer;
 
+    // SceneUniformData m_scene_data;
+    std::unique_ptr<VulkanBuffer> m_material_buffer;
     PushConstantData m_push_constant;
     SpecializationConstantData m_specialization_constant;
 
+    std::unique_ptr<VulkanImage> m_checker_image;
+    std::unique_ptr<VulkanImage> m_white_image;
+    VkSampler m_sampler = VK_NULL_HANDLE;
+
     Camera m_camera {};
+
+    const uint32_t MaxMaterialCount = 256;
 private:
     void CreateObjects();
     void DestroyObjects();

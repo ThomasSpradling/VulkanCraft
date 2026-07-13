@@ -284,7 +284,7 @@ void CommandBuffer::SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) 
     vkCmdSetScissor(m_command_buffer, 0, 1, &scissor);
 }
 
-void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) {
+void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) const {
     Assert(src.Extent().width == dst.Extent().width
         && src.Extent().height == dst.Extent().height
         && src.Extent().depth == dst.Extent().depth, "Cannot copy images of different extents!");
@@ -308,11 +308,11 @@ void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) {
     vkCmdCopyImage(m_command_buffer, src.Image(), src.Layout(), dst.Image(), dst.Layout(), 1, &region);
 }
 
-void CommandBuffer::BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set) {
+void CommandBuffer::BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set) const {
     vkCmdBindDescriptorSets(m_command_buffer, pipeline.BindPoint(), pipeline.Layout(), set, 1, &descriptor_set, 0, nullptr);
 }
 
-void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) {
+void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) const {
     if (!m_command_pool.m_device.EnabledValidations())
         return;
 
@@ -329,14 +329,14 @@ void CommandBuffer::BeginLabel(const std::string &label, glm::vec4 color) {
     vkCmdBeginDebugUtilsLabelEXT(m_command_buffer, &label_info);
 }
 
-void CommandBuffer::EndLabel() {
+void CommandBuffer::EndLabel() const {
     if (!m_command_pool.m_device.EnabledValidations())
         return;
 
     vkCmdEndDebugUtilsLabelEXT(m_command_buffer);
 }
 
-void CommandBuffer::InsertLabel(const std::string &label, glm::vec4 color) {
+void CommandBuffer::InsertLabel(const std::string &label, glm::vec4 color) const {
     if (!m_command_pool.m_device.EnabledValidations())
         return;
 
@@ -353,11 +353,11 @@ void CommandBuffer::InsertLabel(const std::string &label, glm::vec4 color) {
     vkCmdInsertDebugUtilsLabelEXT(m_command_buffer, &label_info);
 }
 
-void CommandBuffer::BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset) {
+void CommandBuffer::BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset) const {
     vkCmdBindVertexBuffers(m_command_buffer, 0, 1, &buffer, &offset);
 }
 
-void CommandBuffer::BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset) {
+void CommandBuffer::BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset) const {
     vkCmdBindIndexBuffer(m_command_buffer, buffer, offset, VK_INDEX_TYPE_UINT32);
 }
 

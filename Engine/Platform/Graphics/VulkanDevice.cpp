@@ -46,54 +46,6 @@ VulkanDevice::~VulkanDevice() {
     std::cout << "Destroyed Vulkan Device.\n";
 }
 
-VkFormat VulkanDevice::GetFormat(DataFormat format) const {
-    switch (format) {
-        case DataFormat::Color:     return m_image_formats.color;
-        case DataFormat::Depth:     return m_image_formats.depth;
-        case DataFormat::DepthStencil: return m_image_formats.depth_stencil;
-        case DataFormat::HDR:       return m_image_formats.hdr;
-
-        case DataFormat::Float:     return VK_FORMAT_R32_SFLOAT;
-        case DataFormat::Float2:    return VK_FORMAT_R32G32_SFLOAT;
-        case DataFormat::Float3:    return VK_FORMAT_R32G32B32_SFLOAT;
-        case DataFormat::Float4:    return VK_FORMAT_R32G32B32A32_SFLOAT;
-
-        case DataFormat::Int:       return VK_FORMAT_R32_SINT;
-        case DataFormat::Int2:      return VK_FORMAT_R32G32_SINT;
-        case DataFormat::Int3:      return VK_FORMAT_R32G32B32_SINT;
-        case DataFormat::Int4:      return VK_FORMAT_R32G32B32A32_SINT;
-
-        case DataFormat::UInt:      return VK_FORMAT_R32_UINT;
-        case DataFormat::UInt2:     return VK_FORMAT_R32G32_UINT;
-        case DataFormat::UInt3:     return VK_FORMAT_R32G32B32_UINT;
-        case DataFormat::UInt4:     return VK_FORMAT_R32G32B32A32_UINT;
-
-        case DataFormat::Short:     return VK_FORMAT_R16_SINT;
-        case DataFormat::Short2:    return VK_FORMAT_R16G16_SINT;
-        case DataFormat::Short3:    return VK_FORMAT_R16G16B16_SINT;
-        case DataFormat::Short4:    return VK_FORMAT_R16G16B16A16_SINT;
-
-        case DataFormat::UShort:     return VK_FORMAT_R16_UINT;
-        case DataFormat::UShort2:    return VK_FORMAT_R16G16_UINT;
-        case DataFormat::UShort3:    return VK_FORMAT_R16G16B16_UINT;
-        case DataFormat::UShort4:    return VK_FORMAT_R16G16B16A16_UINT;
-
-        case DataFormat::Byte:     return VK_FORMAT_R8_SINT;
-        case DataFormat::Byte2:    return VK_FORMAT_R8G8_SINT;
-        case DataFormat::Byte3:    return VK_FORMAT_R8G8B8_SINT;
-        case DataFormat::Byte4:    return VK_FORMAT_R8G8B8A8_SINT;
-
-        case DataFormat::UByte:     return VK_FORMAT_R8_UINT;
-        case DataFormat::UByte2:    return VK_FORMAT_R8G8_UINT;
-        case DataFormat::UByte3:    return VK_FORMAT_R8G8B8_UINT;
-        case DataFormat::UByte4:    return VK_FORMAT_R8G8B8A8_UINT;
-
-        case DataFormat::None:
-        default:
-            return VK_FORMAT_UNDEFINED;
-    }
-}
-
 VkQueue VulkanDevice::Queue(QueueType type) const {
     switch (type) {
         case QueueType::Present:
@@ -442,6 +394,7 @@ void VulkanDevice::CreateVulkanDevice() {
         .features = {
             .depthBiasClamp = VK_TRUE,
             .fillModeNonSolid = VK_TRUE,
+            .shaderInt16 = VK_TRUE,
         }
     };
 
@@ -453,6 +406,8 @@ void VulkanDevice::CreateVulkanDevice() {
 
     VkPhysicalDeviceVulkan11Features feat11 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .storageBuffer16BitAccess = VK_TRUE,
+        .storagePushConstant16 = VK_TRUE,
         .shaderDrawParameters = VK_TRUE,
     };
 
@@ -469,7 +424,8 @@ void VulkanDevice::CreateVulkanDevice() {
 
         .descriptorBindingPartiallyBound = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,
-
+        
+        .scalarBlockLayout = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
     };
 
@@ -751,12 +707,17 @@ void VulkanDevice::ChooseImageFormats() {
     {
         //// COLOR ////
         // ordered from most preferable
-        const std::vector<VkFormat> color_candidates = {
+        const std::vector<VkFormat> linear_color_candidates = {
             VK_FORMAT_R8G8B8A8_UNORM,
-            VK_FORMAT_R8G8B8A8_SRGB
         };
-        m_image_formats.color = pick_supported_format(color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        Assert(m_image_formats.color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+        m_image_formats.linear_color = pick_supported_format(linear_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.linear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+
+        const std::vector<VkFormat> nonlinear_color_candidates = {
+            VK_FORMAT_R8G8B8A8_SRGB,
+        };
+        m_image_formats.nonlinear_color = pick_supported_format(nonlinear_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
+        Assert(m_image_formats.nonlinear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
 
         //// DEPTH STENCIL ////
         const std::vector<VkFormat> depth_stencil_candidates = {

@@ -30,11 +30,51 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddBinding(uint32_t binding,
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddAttribute(uint32_t location, uint32_t binding, DataFormat format, uint32_t offset) {
+PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddAttribute(uint32_t location, uint32_t binding, AttributeFormat format, uint32_t offset) {
+    static const auto get_vulkan_format = [](AttributeFormat attribute) {
+        switch (attribute) {
+            case AttributeFormat::Float:     return VK_FORMAT_R32_SFLOAT;
+            case AttributeFormat::Float2:    return VK_FORMAT_R32G32_SFLOAT;
+            case AttributeFormat::Float3:    return VK_FORMAT_R32G32B32_SFLOAT;
+            case AttributeFormat::Float4:    return VK_FORMAT_R32G32B32A32_SFLOAT;
+    
+            case AttributeFormat::Int:       return VK_FORMAT_R32_SINT;
+            case AttributeFormat::Int2:      return VK_FORMAT_R32G32_SINT;
+            case AttributeFormat::Int3:      return VK_FORMAT_R32G32B32_SINT;
+            case AttributeFormat::Int4:      return VK_FORMAT_R32G32B32A32_SINT;
+    
+            case AttributeFormat::UInt:      return VK_FORMAT_R32_UINT;
+            case AttributeFormat::UInt2:     return VK_FORMAT_R32G32_UINT;
+            case AttributeFormat::UInt3:     return VK_FORMAT_R32G32B32_UINT;
+            case AttributeFormat::UInt4:     return VK_FORMAT_R32G32B32A32_UINT;
+    
+            case AttributeFormat::Short:     return VK_FORMAT_R16_SINT;
+            case AttributeFormat::Short2:    return VK_FORMAT_R16G16_SINT;
+            case AttributeFormat::Short3:    return VK_FORMAT_R16G16B16_SINT;
+            case AttributeFormat::Short4:    return VK_FORMAT_R16G16B16A16_SINT;
+    
+            case AttributeFormat::UShort:    return VK_FORMAT_R16_UINT;
+            case AttributeFormat::UShort2:   return VK_FORMAT_R16G16_UINT;
+            case AttributeFormat::UShort3:   return VK_FORMAT_R16G16B16_UINT;
+            case AttributeFormat::UShort4:   return VK_FORMAT_R16G16B16A16_UINT;
+    
+            case AttributeFormat::Byte:      return VK_FORMAT_R8_SINT;
+            case AttributeFormat::Byte2:     return VK_FORMAT_R8G8_SINT;
+            case AttributeFormat::Byte3:     return VK_FORMAT_R8G8B8_SINT;
+            case AttributeFormat::Byte4:     return VK_FORMAT_R8G8B8A8_SINT;
+    
+            case AttributeFormat::UByte:     return VK_FORMAT_R8_UINT;
+            case AttributeFormat::UByte2:    return VK_FORMAT_R8G8_UINT;
+            case AttributeFormat::UByte3:    return VK_FORMAT_R8G8B8_UINT;
+            case AttributeFormat::UByte4:    return VK_FORMAT_R8G8B8A8_UINT;
+        }
+        return VK_FORMAT_UNDEFINED;
+    };
+    
     m_vertex_input_state.attribute_descriptions.push_back({
         .location = location,
         .binding = binding,
-        .format = m_device.GetFormat(format),
+        .format = get_vulkan_format(format),
         .offset = offset,
     });
 

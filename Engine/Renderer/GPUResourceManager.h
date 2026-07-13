@@ -22,6 +22,11 @@ using SamplerId = uint32_t;
 using StorageImageId = uint32_t;
 using AccelerationStructureId = uint32_t;
 
+inline constexpr TextureId DefaultTextureId = 0;
+inline constexpr SamplerId DefaultSamplerId = 0;
+inline constexpr StorageImageId DefaultStorageImageId = 0;
+inline constexpr AccelerationStructureId DefaultAccelerationStructureId = 0;
+
 class GPUResourceManager {
 public:
     GPUResourceManager(const VulkanDevice &device);
@@ -30,12 +35,18 @@ public:
     VkDescriptorSetLayout GlobalDescriptorLayout() const { return m_global_descriptor_layout; }
     VkDescriptorSet GlobalDescriptorSet() const { return m_global_descriptor_set; }
     
-    TextureId AddTexture(const VulkanImage &image);
+    // Note: Anything added here takes ownership away from caller
+    TextureId AddTexture(std::unique_ptr<VulkanImage> &image);
     SamplerId AddSampler(VkSampler sampler);
-    StorageImageId AddStorageImage(const VulkanImage &image);
+    StorageImageId AddStorageImage(std::unique_ptr<VulkanImage> &image);
     AccelerationStructureId AddAccelerationStructure(VkAccelerationStructureKHR acceleration_structure);
+
+    VulkanImage &GetTexture(TextureId id);
+    VkSampler GetSampler(SamplerId id);
+    VulkanImage &GetStorageImage(StorageImageId id);
+    VkAccelerationStructureKHR GetAccelerationStructure(AccelerationStructureId id);
 private:
-    template <size_t Capacity> 
+    template <size_t Capacity>
     struct FreeList {
         std::vector<uint32_t> data;
 
@@ -43,7 +54,7 @@ private:
             static_assert(Capacity > 1);
             data.reserve(Capacity - 1);
 
-            for (uint32_t i = Capacity; i > 0; --i)
+            for (uint32_t i = Capacity - 1; i > 0; --i)
                 data.push_back(i);
         }
 
@@ -69,10 +80,15 @@ private:
     VkDescriptorSetLayout m_global_descriptor_layout = VK_NULL_HANDLE;
     VkDescriptorSet m_global_descriptor_set = VK_NULL_HANDLE;
 
-    FreeList<MaxTextures> m_textures;
-    FreeList<MaxSamplers> m_samplers;
-    FreeList<MaxStorageImages> m_storage_images;
-    FreeList<MaxAccelerationStructures> m_acceleration_structures;
+    FreeList<MaxTextures> m_texture_ids;
+    FreeList<MaxSamplers> m_sampler_ids;
+    FreeList<MaxStorageImages> m_storage_image_ids;
+    FreeList<MaxAccelerationStructures> m_acceleration_structure_ids;
+
+    std::array<std::unique_ptr<VulkanImage>, MaxTextures> m_textures {};
+    std::array<VkSampler, MaxSamplers> m_samplers {};
+    std::array<std::unique_ptr<VulkanImage>, MaxStorageImages> m_storage_images {};
+    std::array<VkAccelerationStructureKHR, MaxAccelerationStructures> m_acceleration_structures {};
 private:
     void WriteTexture(TextureId id, const VulkanImage &image);
     void WriteSampler(SamplerId id, VkSampler sampler);

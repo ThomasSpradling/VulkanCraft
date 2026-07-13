@@ -1,4 +1,5 @@
 #include "GPUResourceManager.h"
+#include "Platform/Graphics/CommandBuffer.h"
 #include <iostream>
 
 GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
@@ -85,10 +86,90 @@ GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
     //// Global Descriptor Set ////
     m_global_descriptor_set = m_descriptor_allocator->AllocateDescriptorSet(m_global_descriptor_layout);
     std::cout << "Created GPU resource manager.\n";
+
+    //// Add Default Texture ////
+    std::array<glm::u8vec4, 1> white_pixels {
+        glm::u8vec4(255, 255, 255, 255)
+    };
+
+    auto white_texture = VulkanImage::ImageBuilder(m_device)
+        .Image2D(1, 1)
+        .Format(VK_FORMAT_R8G8B8A8_UNORM)
+        .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        .Build();
+    white_texture->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    white_texture->Upload(white_pixels.data(), sizeof(glm::u8vec4) * white_pixels.size());
+
+    m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        cmd.ImageMemoryBarrier(*white_texture)
+            .DestAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
+            .DestStage(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR)
+            .TransitionLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+            .Execute();
+    });
+    
+    m_textures[DefaultTextureId] = std::move(white_texture);
+    WriteTexture(DefaultTextureId, *m_textures[DefaultTextureId]);
+    // TextureId white_texture_id = AddTexture(white_texture);
+    // Assert(white_texture_id == 0, "Error initializing default texture in resource manager!");
+
+    //// Add Default Sampler ////
+    
+    VkSamplerCreateInfo sampler_create_info {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+
+        .mipLodBias = 0.0f,
+        .anisotropyEnable = VK_FALSE,
+        .maxAnisotropy = 1.0f,
+
+        .compareEnable = VK_FALSE,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .unnormalizedCoordinates = VK_FALSE,
+    };
+    
+    VkSampler sampler;
+    vkCreateSampler(m_device.Device(), &sampler_create_info, nullptr, &sampler);
+
+    m_samplers[DefaultSamplerId] = sampler;
+    WriteSampler(0, m_samplers[DefaultSamplerId]);
+
+    // SamplerId sampler_id = AddSampler(sampler);
+    // Assert(sampler_id == 0, "Error initializing default sampler in resource manager!");
 }
 
 GPUResourceManager::~GPUResourceManager() {
     std::cout << "Destroying GPU resource manager.\n";
+    for (auto &texture : m_textures) {
+        texture.reset();
+    }
+
+    for (auto sampler : m_samplers) {
+        vkDestroySampler(m_device.Device(), sampler, nullptr);
+    }
+
+    for (auto &image : m_storage_images) {
+        image.reset();
+    }
+
+    for (auto acceleration_structure : m_acceleration_structures) {
+        vkDestroyAccelerationStructureKHR(m_device.Device(), acceleration_structure, nullptr);
+    }
+    
     m_descriptor_allocator.reset();
 
     if (m_global_descriptor_layout != VK_NULL_HANDLE) {
@@ -97,27 +178,31 @@ GPUResourceManager::~GPUResourceManager() {
     }
 }
 
-TextureId GPUResourceManager::AddTexture(const VulkanImage &image) {
-    TextureId id = m_textures.Acquire();
-    WriteTexture(id, image);
+TextureId GPUResourceManager::AddTexture(std::unique_ptr<VulkanImage> &image) {
+    TextureId id = m_texture_ids.Acquire();
+    WriteTexture(id, *image);
+    m_textures[id] = std::move(image);
     return id;
 }
 
 SamplerId GPUResourceManager::AddSampler(VkSampler sampler) {
-    SamplerId id = m_samplers.Acquire();
+    SamplerId id = m_sampler_ids.Acquire();
     WriteSampler(id, sampler);
+    m_samplers[id] = sampler;
     return id;
 }
 
-StorageImageId GPUResourceManager::AddStorageImage(const VulkanImage &image) {
-    StorageImageId id = m_storage_images.Acquire();
-    WriteStorageImage(id, image);
+StorageImageId GPUResourceManager::AddStorageImage(std::unique_ptr<VulkanImage> &image) {
+    StorageImageId id = m_storage_image_ids.Acquire();
+    WriteStorageImage(id, *image);
+    m_storage_images[id] = std::move(image);
     return id;
 }
 
 AccelerationStructureId GPUResourceManager::AddAccelerationStructure(VkAccelerationStructureKHR acceleration_structure) {
-    AccelerationStructureId id = m_acceleration_structures.Acquire();
+    AccelerationStructureId id = m_acceleration_structure_ids.Acquire();
     WriteAccelerationStructure(id, acceleration_structure);
+    m_acceleration_structures[id] = acceleration_structure;
     return id;
 }
 

@@ -5,6 +5,7 @@
 #include <format>
 #include <memory>
 #include "CommandBuffer.h"
+#include "VulkanDevice.h"
 
 // ============================== //
 // ---- Vulkan Image Builder ---- //
@@ -109,7 +110,7 @@ VulkanImageBuilder &VulkanImageBuilder::SharedQueueFamilies(std::span<uint32_t> 
     return *this;
 }
 
-std::unique_ptr<VulkanImage> VulkanImageBuilder::Build(const VulkanDevice &device) {
+std::unique_ptr<VulkanImage> VulkanImageBuilder::Build() {
     VkSharingMode sharing_mode = m_queue_families.size() >= 2 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     
     Assert(m_format, "Image must have a format!");
@@ -146,9 +147,9 @@ std::unique_ptr<VulkanImage> VulkanImageBuilder::Build(const VulkanDevice &devic
     VkImage image;
     VmaAllocation allocation;
     VmaAllocationInfo allocation_info;
-    VK_CHECK(vmaCreateImage(device.Allocator(), &image_create_info, &allocation_create_info, &image, &allocation, &allocation_info));
+    VK_CHECK(vmaCreateImage(m_device.Allocator(), &image_create_info, &allocation_create_info, &image, &allocation, &allocation_info));
 
-    auto vk_image = std::make_unique<VulkanImage>(device);
+    auto vk_image = std::make_unique<VulkanImage>(m_device);
 
     vk_image->m_image = image;
 
@@ -288,12 +289,12 @@ void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t la
         || m_layout == VK_IMAGE_LAYOUT_GENERAL
         || m_layout == VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR, "Cannot upload image unless layout is either TRANSFER_DST, GENERAL, or SHARED_PRESENT.");
 
-    auto staging_buffer = VulkanBuffer::BufferBuilder()
+    auto staging_buffer = VulkanBuffer::BufferBuilder(m_device)
         .AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
         .Size(bytes)
-        .Build(m_device);
+        .Build();
 
     std::memcpy(staging_buffer->Mapped(), data, bytes);
 

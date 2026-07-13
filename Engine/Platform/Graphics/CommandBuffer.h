@@ -91,29 +91,29 @@ public:
 
     void SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const;
 
-    void CopyImage(const VulkanImage &src, const VulkanImage &dst);
+    void CopyImage(const VulkanImage &src, const VulkanImage &dst) const;
 
-    void BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set);
+    void BindDescriptorSet(uint32_t set, const VulkanPipeline &pipeline, VkDescriptorSet descriptor_set) const;
     
     template<typename T>
-    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, uint32_t offset, uint32_t size, const T &data) {
+    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, uint32_t offset, uint32_t size, const T &data) const {
         vkCmdPushConstants(m_command_buffer, layout, stage, offset, size, &data);
     }
 
     template<typename T>
-    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, const T &data) {
+    void PushConstants(VkPipelineLayout layout, VkShaderStageFlags stage, const T &data) const {
         vkCmdPushConstants(m_command_buffer, layout, stage, 0, sizeof(T), &data);
     }
 
     //// Debug Commands ////
-    void BeginLabel(const std::string &label, glm::vec4 color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-    void EndLabel();
-    void InsertLabel(const std::string &label, glm::vec4 color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+    void BeginLabel(const std::string &label, glm::vec4 color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) const;
+    void EndLabel() const;
+    void InsertLabel(const std::string &label, glm::vec4 color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) const;
 
     //// Graphics Commands ////
 
-    void BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset = 0);
-    void BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset = 0);
+    void BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset = 0) const;
+    void BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset = 0) const;
 
     void Draw(uint32_t vertex_count, uint32_t instance_count = 1, uint32_t first_vertex = 0, uint32_t first_instance = 0) const;
     void DrawIndexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0) const;

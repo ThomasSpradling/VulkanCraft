@@ -23,7 +23,7 @@ target_compile_definitions(engine_definitions INTERFACE
 
 # -- VALIDATION LAYERS -- #
 
-option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" ON)
+option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" OFF)
 
 target_compile_definitions(engine_definitions INTERFACE
     ENGINE_ENABLE_VALIDATION_LAYERS=$<BOOL:${ENGINE_ENABLE_VALIDATION_LAYERS}>

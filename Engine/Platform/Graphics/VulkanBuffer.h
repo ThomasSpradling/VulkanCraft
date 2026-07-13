@@ -10,7 +10,7 @@ class VulkanBuffer;
 class VulkanBufferBuilder {
     friend VulkanBuffer;
 public:
-    VulkanBufferBuilder() = default;
+    VulkanBufferBuilder(const VulkanDevice &device) : m_device(device) {};
     VulkanBufferBuilder &Size(VkDeviceSize size);
     VulkanBufferBuilder &AddUsage(VkBufferUsageFlags usage);
     VulkanBufferBuilder &AddMemoryFlags(VmaAllocationCreateFlags flag);
@@ -20,8 +20,10 @@ public:
     VulkanBufferBuilder &DedicateMemory();
     
     VulkanBufferBuilder &SharedQueueFamilies(std::span<uint32_t> queues);
-    std::unique_ptr<VulkanBuffer> Build(const VulkanDevice &device);
+    std::unique_ptr<VulkanBuffer> Build();
 private:
+    const VulkanDevice &m_device;
+
     VkDeviceSize m_size = 0ull;
     VkBufferUsageFlags m_usage = 0;
     VmaAllocationCreateFlags m_memory_flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
@@ -34,7 +36,7 @@ public:
     VulkanBuffer(const VulkanDevice &device);
     ~VulkanBuffer();
 
-    static inline VulkanBufferBuilder BufferBuilder() { return VulkanBufferBuilder(); }
+    static inline VulkanBufferBuilder BufferBuilder(const VulkanDevice &device) { return VulkanBufferBuilder(device); }
 
     void SetDebugName(std::string_view name) const;
 

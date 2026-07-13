@@ -34,7 +34,7 @@ VulkanBufferBuilder &VulkanBufferBuilder::SharedQueueFamilies(std::span<uint32_t
     return *this;
 }
 
-std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build(const VulkanDevice &device) {
+std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build() {
     VkSharingMode sharing_mode = m_queue_families.size() >= 2 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     
     VkBufferCreateInfo buffer_create_info {
@@ -57,9 +57,9 @@ std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build(const VulkanDevice &dev
     VkBuffer buffer;
     VmaAllocation allocation;
     VmaAllocationInfo allocation_info;
-    VK_CHECK(vmaCreateBuffer(device.Allocator(), &buffer_create_info, &allocation_create_info, &buffer, &allocation, &allocation_info));
+    VK_CHECK(vmaCreateBuffer(m_device.Allocator(), &buffer_create_info, &allocation_create_info, &buffer, &allocation, &allocation_info));
 
-    auto vk_buffer = std::make_unique<VulkanBuffer>(device);
+    auto vk_buffer = std::make_unique<VulkanBuffer>(m_device);
     vk_buffer->m_size = m_size;
     vk_buffer->m_usage = m_usage;
     vk_buffer->m_buffer = buffer;
@@ -107,12 +107,12 @@ void VulkanBuffer::Resize(VkDeviceSize size) {
     Assert(m_initialized, "Cannot resize to un-initialized VulkanBuffer");
     
     vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
-    auto buffer = VulkanBuffer::BufferBuilder()
+    auto buffer = VulkanBuffer::BufferBuilder(m_device)
         .Size(size)
         .AddMemoryFlags(m_memory_flags)
         .SharedQueueFamilies(m_queue_families)
         .AddUsage(m_usage)
-        .Build(m_device);
+        .Build();
 
     m_size = buffer->m_size;
     m_usage = buffer->m_usage;
@@ -143,12 +143,12 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
         return;
     }
 
-    auto staging_buffer = VulkanBuffer::BufferBuilder()
+    auto staging_buffer = VulkanBuffer::BufferBuilder(m_device)
         .Size(bytes)
         .AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
         .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
-        .Build(m_device);
+        .Build();
     staging_buffer->Upload(data, bytes, 0);
     
     m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {

@@ -23,21 +23,6 @@ enum class QueueType : uint8_t {
     DedicatedCompute,
 };
 
-enum class DataFormat : uint8_t {
-    None,
-    Color,
-    Depth,
-    DepthStencil,
-    HDR,
-    Float, Float2, Float3, Float4,
-    Int, Int2, Int3, Int4,
-    UInt, UInt2, UInt3, UInt4,
-    Short, Short2, Short3, Short4,
-    UShort, UShort2, UShort3, UShort4,
-    Byte, Byte2, Byte3, Byte4,
-    UByte, UByte2, UByte3, UByte4,
-};
-
 struct QueueSubmitInfo {
     struct SemaphoreSubmit {
         const VulkanSemaphore *semaphore = nullptr;
@@ -67,8 +52,8 @@ public:
     VkSurfaceKHR Surface() const { return m_surface; }
     VmaAllocator Allocator() const { return m_allocator; }
 
-    VkFormat GetFormat(DataFormat format) const;
-    VkFormat GetColorFormat() const { return m_image_formats.color; }
+    VkFormat GetLinearColorFormat() const { return m_image_formats.linear_color; }
+    VkFormat GetNonLinearColorFormat() const { return m_image_formats.nonlinear_color; }
     VkFormat GetDepthStencilFormat() const { return m_image_formats.depth_stencil; }
     VkFormat GetDepthOnlyFormat() const { return m_image_formats.depth; }
     VkFormat GetHDRFormat() const { return m_image_formats.hdr; }
@@ -138,7 +123,8 @@ private:
     };
 
     struct ImageFormats {
-        VkFormat color;
+        VkFormat linear_color;
+        VkFormat nonlinear_color;
         VkFormat depth_stencil;
         VkFormat depth;
         VkFormat hdr;

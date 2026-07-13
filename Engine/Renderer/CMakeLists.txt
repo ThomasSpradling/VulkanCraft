@@ -1,5 +1,6 @@
 add_library(engine_renderer STATIC
     DebugRenderer.cpp
+    GLTFModel.cpp
     GPUResourceManager.cpp
     Renderer.cpp
     Renderer2D.cpp

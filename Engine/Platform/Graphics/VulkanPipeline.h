@@ -31,13 +31,23 @@ struct ColorAttachment {
     BlendMode blending_mode = BlendMode::Disabled;
 };
 
+enum class AttributeFormat : uint8_t {
+    Float, Float2, Float3, Float4,
+    Int, Int2, Int3, Int4,
+    UInt, UInt2, UInt3, UInt4,
+    Short, Short2, Short3, Short4,
+    UShort, UShort2, UShort3, UShort4,
+    Byte, Byte2, Byte3, Byte4,
+    UByte, UByte2, UByte3, UByte4,
+};
+
 class VulkanPipeline;
 class PipelineBuilder_Graphics {
 public:
     PipelineBuilder_Graphics(const VulkanDevice &device);
     
     PipelineBuilder_Graphics &AddBinding(uint32_t binding, uint32_t stride, VkVertexInputRate input_rate = VK_VERTEX_INPUT_RATE_VERTEX);
-    PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, DataFormat format, uint32_t offset = 0);
+    PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, AttributeFormat format, uint32_t offset = 0);
 
     PipelineBuilder_Graphics &FromBase(VkPipeline base_pipeline);
 

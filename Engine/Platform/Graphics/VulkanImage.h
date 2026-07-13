@@ -15,7 +15,7 @@ class VulkanImage;
 class VulkanImageBuilder {
     friend VulkanImage;
 public:
-    VulkanImageBuilder() = default;
+    VulkanImageBuilder(const VulkanDevice &device) : m_device(device) {};
 
     VulkanImageBuilder &Image2D(uint32_t width, uint32_t height);
     VulkanImageBuilder &Image3D(uint32_t width, uint32_t height, uint32_t depth);
@@ -48,10 +48,12 @@ public:
 
     VulkanImageBuilder &SharedQueueFamilies(std::span<uint32_t> queues);
 
-    std::unique_ptr<VulkanImage> Build(const VulkanDevice &device);
+    std::unique_ptr<VulkanImage> Build();
 private:
-    VkImageType m_type;
-    VkImageViewType m_view_type;
+    const VulkanDevice &m_device;
+
+    VkImageType m_type = VkImageType::VK_IMAGE_TYPE_2D;
+    VkImageViewType m_view_type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D;
 
     VkExtent3D m_extent {};
     uint32_t m_array_layers = 1;
@@ -59,8 +61,8 @@ private:
 
     uint32_t m_sample_count = 1u;
 
-    VkFormat m_format;
-    VkImageLayout m_layout;
+    VkFormat m_format = VK_FORMAT_UNDEFINED;
+    VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImageUsageFlags m_usage = 0;
     VkImageCreateFlags m_flags = 0;
@@ -79,7 +81,7 @@ public:
 
     // Creates a container for an externally-managed image (e.g. via a swapchain)
     static std::unique_ptr<VulkanImage> ExternalImage2D(const VulkanDevice &device, VkImage image, glm::ivec2 size, VkFormat format, uint32_t layers, VkImageUsageFlags usage);
-    static inline VulkanImageBuilder ImageBuilder() { return VulkanImageBuilder(); }
+    static inline VulkanImageBuilder ImageBuilder(const VulkanDevice &device) { return VulkanImageBuilder(device); }
 
     void SetDebugName(std::string_view name) const;
 

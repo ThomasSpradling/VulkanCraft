@@ -3,6 +3,7 @@
 #include "Camera.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
+#include "GLTFModel.h"
 #include "GPUResourceManager.h"
 #include "Platform/Graphics/DescriptorAllocator.h"
 #include "Platform/Graphics/VulkanBuffer.h"
@@ -40,8 +41,6 @@ private:
 
         std::unique_ptr<VulkanFence> graphics_submit_fence;
         std::unique_ptr<VulkanSemaphore> image_available;
-
-        // VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
         std::unique_ptr<VulkanBuffer> scene_uniform_buffer;
     };
     
@@ -82,42 +81,35 @@ private:
 private:
     static constexpr uint32_t MaxFramesInFlight = 3;
     const Window &m_window;
+    
+    bool m_enable_vsync = false;
 
+    // GPU Context
     std::unique_ptr<VulkanDevice> m_device = nullptr;
     std::unique_ptr<VulkanSwapChain> m_swapchain = nullptr;
     std::unique_ptr<ShaderCompiler> m_shader_compiler = nullptr;
 
-    std::vector<FrameContext> m_frame_data;
     std::vector<SwapChainContext> m_swapchain_data;
-
-    uint32_t m_frame_index = 0;
-
-    bool m_enable_vsync = false;
-
-    // App specific data
     std::unique_ptr<GPUResourceManager> m_resource_manager;
+    
+    // Frame Data
+    uint32_t m_frame_index = 0;
+    std::vector<FrameContext> m_frame_data;
 
+    // Rendering Data
     std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
     std::unique_ptr<VulkanPipeline> m_wireframe_pipeline;
 
     std::optional<CompiledShader> m_triangle_shader;
+    std::unique_ptr<GLTFModel> m_model;
 
-    std::unique_ptr<VulkanBuffer> m_vertex_buffer;
-    std::unique_ptr<VulkanBuffer> m_index_buffer;
-
-    // SceneUniformData m_scene_data;
-    std::unique_ptr<VulkanBuffer> m_material_buffer;
     PushConstantData m_push_constant;
     SpecializationConstantData m_specialization_constant;
 
-    std::unique_ptr<VulkanImage> m_checker_image;
-    std::unique_ptr<VulkanImage> m_white_image;
-    VkSampler m_sampler = VK_NULL_HANDLE;
-
     Camera m_camera {};
-
-    const uint32_t MaxMaterialCount = 256;
 private:
+    void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
+
     void CreateObjects();
     void DestroyObjects();
 

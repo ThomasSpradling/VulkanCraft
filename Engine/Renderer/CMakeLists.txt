@@ -16,4 +16,5 @@ target_link_libraries(engine_renderer PUBLIC
     imgui
     tinygltf
     slang::slang
+    mikktspace
 )

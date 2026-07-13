@@ -54,6 +54,11 @@ ImageBarrier &ImageBarrier::DestStage(VkPipelineStageFlags2 stage) {
     return *this;
 }
 
+ImageBarrier &ImageBarrier::SourceLayout(VkImageLayout source_layout) {
+    m_source_layout = source_layout;
+    return *this;
+}
+
 ImageBarrier &ImageBarrier::TransitionLayout(VkImageLayout new_layout) {
     Assert(new_layout != VK_IMAGE_LAYOUT_UNDEFINED, "An image cannot be transitioned into LAYOUT_UNDEFINED!");
 
@@ -68,7 +73,7 @@ ImageBarrier &ImageBarrier::SubresourceRange(const VkImageSubresourceRange &subr
 }
 
 void ImageBarrier::Execute() {
-    const VkImageLayout old_layout = m_image.Layout();
+    const VkImageLayout old_layout = m_source_layout == VK_IMAGE_LAYOUT_UNDEFINED ? m_image.Layout() : m_source_layout;
 
     if (m_src_stage == 0)
         m_src_stage = InferPipelineStageFlags(old_layout);
@@ -373,40 +378,46 @@ void CommandBuffer::SetDebugName(std::string_view name) const {
     m_command_pool.m_device.SetDebugName(m_command_buffer, name);
 }
 
-void GenerateMipMaps(VulkanImage &image, VkFilter filter) {
-    
-}
-
-
 ImageBarrier CommandBuffer::ImageMemoryBarrier(VulkanImage &image) const {
     return ImageBarrier(m_command_buffer, image);
 }
 
-void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout image_layout) const {
+void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout target_layout) const {
     ImageMemoryBarrier(image)
-        .TransitionLayout(image_layout)
+        .TransitionLayout(target_layout)
         .Execute();
 }
 
-void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout image_layout, const VkImageSubresourceRange &range) const {
+void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout source_layout, VkImageLayout target_layout, const VkImageSubresourceRange &range) const {
     ImageMemoryBarrier(image)
-        .TransitionLayout(image_layout)
+        .SourceLayout(source_layout)
+        .TransitionLayout(target_layout)
         .SubresourceRange(range)
         .Execute();
 }
+
+void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout target_layout, const VkImageSubresourceRange &range) const {
+    ImageMemoryBarrier(image)
+        .TransitionLayout(target_layout)
+        .SubresourceRange(range)
+        .Execute();
+}
+
 
 void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer) const {
     Assert(image.MipLevels() > 1, "Should not generate mipmaps with just one mip level.");
     Assert(image.SampleCount() == 1u, "Cannot generate mipmaps for multi-sampled image!");
     Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
+    Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Cannot generate mipmaps for image without usage TRANSFER_DST_BIT!");
     
     const VkImageLayout old_layout = image.Layout();
     const VkExtent3D &extent = image.Extent();
     const VkImageAspectFlags aspect = GetFormatAspect(image.Format());
 
+    TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
     for (uint32_t level = 1; level < image.MipLevels(); ++level) {
-        // Transition previous level to TRANSFER_SRC and current level to TRANSFER_DST
-        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VkImageSubresourceRange {
+        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VkImageSubresourceRange {
             .aspectMask = aspect,
             .baseMipLevel = level - 1,
             .levelCount = 1,
@@ -414,13 +425,13 @@ void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_
             .layerCount = 1,
         });
 
-        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageSubresourceRange {
-            .aspectMask = aspect,
-            .baseMipLevel = level,
-            .levelCount = 1,
-            .baseArrayLayer = layer,
-            .layerCount = 1,
-        });
+        // TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageSubresourceRange {
+        //     .aspectMask = aspect,
+        //     .baseMipLevel = level,
+        //     .levelCount = 1,
+        //     .baseArrayLayer = layer,
+        //     .layerCount = 1,
+        // });
 
         // Layer L will have dimensions floor(W / 2^L) by floor(H / 2^L) where W and H were
         // the base layer's Width and Height, respectively
@@ -435,8 +446,8 @@ void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_
             .srcOffsets = {
                 VkOffset3D { .x = 0, .y = 0, .z = 0 },
                 VkOffset3D {
-                    .x = static_cast<int32_t>(extent.width) >> (level - 1),
-                    .y = static_cast<int32_t>(extent.height) >> (level - 1),
+                    .x = std::max(static_cast<int32_t>(extent.width) >> (level - 1), 1),
+                    .y = std::max(static_cast<int32_t>(extent.height) >> (level - 1), 1),
                     .z = 1
                 }
             },
@@ -449,8 +460,8 @@ void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_
             .dstOffsets = {
                 VkOffset3D { .x = 0, .y = 0, .z = 0 },
                 VkOffset3D {
-                    .x = static_cast<int32_t>(extent.width) >> level,
-                    .y = static_cast<int32_t>(extent.height) >> level,
+                    .x = std::max(static_cast<int32_t>(extent.width) >> level, 1),
+                    .y = std::max(static_cast<int32_t>(extent.height) >> level, 1),
                     .z = 1
                 },
             },
@@ -468,12 +479,22 @@ void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_
         };
         vkCmdBlitImage2(m_command_buffer, &blit_image_info);
 
-        TransitionLayout(image, old_layout, VkImageSubresourceRange {
+        TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, old_layout, VkImageSubresourceRange {
             .aspectMask = aspect,
-            .baseMipLevel = level,
+            .baseMipLevel = level - 1,
             .levelCount = 1,
             .baseArrayLayer = layer,
             .layerCount = 1,
         });
     }
+
+    TransitionLayout(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, old_layout, VkImageSubresourceRange{
+        .aspectMask = aspect,
+        .baseMipLevel = image.MipLevels() - 1,
+        .levelCount = 1,
+        .baseArrayLayer = layer,
+        .layerCount = 1,
+    });
+
+    image.SetLayout(old_layout);
 }

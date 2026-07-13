@@ -102,13 +102,22 @@ endif()
 # Vulkan Memory Allocator
 add_subdirectory(VulkanMemoryAllocator)
 
-# crc32
+# crc32 for checksum generation
 add_library(crc32 STATIC
     crc32/crc32.cpp
 )
 
 target_include_directories(crc32 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/crc32
+)
+
+# MikkTSpace for tangent space generation
+add_library(mikktspace STATIC
+    MikkTSpace/mikktspace.cpp
+)
+
+target_include_directories(mikktspace PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/mikktspace
 )
 
 # ImGui

@@ -88,30 +88,28 @@ GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
     std::cout << "Created GPU resource manager.\n";
 
     //// Add Default Texture ////
-    std::array<glm::u8vec4, 1> white_pixels {
-        glm::u8vec4(255, 255, 255, 255)
+    std::array<glm::u8vec4, 1> default_pixels {
+        glm::u8vec4(180, 180, 180, 255)
     };
 
-    auto white_texture = VulkanImage::ImageBuilder(m_device)
+    auto default_texture = VulkanImage::ImageBuilder(m_device)
         .Image2D(1, 1)
         .Format(VK_FORMAT_R8G8B8A8_UNORM)
         .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
         .Build();
-    white_texture->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    white_texture->Upload(white_pixels.data(), sizeof(glm::u8vec4) * white_pixels.size());
+    default_texture->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    default_texture->Upload(default_pixels.data(), sizeof(glm::u8vec4) * default_pixels.size());
 
     m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
-        cmd.ImageMemoryBarrier(*white_texture)
+        cmd.ImageMemoryBarrier(*default_texture)
             .DestAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
             .DestStage(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR)
             .TransitionLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
             .Execute();
     });
     
-    m_textures[DefaultTextureId] = std::move(white_texture);
+    m_textures[DefaultTextureId] = std::move(default_texture);
     WriteTexture(DefaultTextureId, *m_textures[DefaultTextureId]);
-    // TextureId white_texture_id = AddTexture(white_texture);
-    // Assert(white_texture_id == 0, "Error initializing default texture in resource manager!");
 
     //// Add Default Sampler ////
     
@@ -147,9 +145,6 @@ GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
 
     m_samplers[DefaultSamplerId] = sampler;
     WriteSampler(0, m_samplers[DefaultSamplerId]);
-
-    // SamplerId sampler_id = AddSampler(sampler);
-    // Assert(sampler_id == 0, "Error initializing default sampler in resource manager!");
 }
 
 GPUResourceManager::~GPUResourceManager() {

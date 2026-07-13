@@ -217,19 +217,21 @@ void Renderer::RecordCommands(const FrameContext &frame) {
             });
             attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
 
-            cmd.BeginLabel("Draw Model", glm::vec4(0.4f, 0.4f, 0.4f, 1.0f));
+            cmd.BeginLabel("Draw Model", glm::vec4(0.2f, 0.8f, 0.2f, 1.0f));
             cmd.BindPipeline(*m_triangle_pipeline);
             cmd.BeginRendering(attachments);
                 DrawGLTF(*m_model, cmd);
             cmd.EndRendering();
-
-            attachments[0].should_clear = false;
-            attachments[1].should_clear = false;
-            cmd.BindPipeline(*m_wireframe_pipeline);
-            cmd.BeginRendering(attachments);
-                DrawGLTF(*m_model, cmd);
-            cmd.EndRendering();
             cmd.EndLabel();
+
+            // attachments[0].should_clear = false;
+            // attachments[1].should_clear = false;
+            // cmd.BeginLabel("Draw Wireframe", glm::vec4(0.4f, 0.4f, 0.4f, 1.0f));
+            // cmd.BindPipeline(*m_wireframe_pipeline);
+            // cmd.BeginRendering(attachments);
+            //     DrawGLTF(*m_model, cmd);
+            // cmd.EndRendering();
+            // cmd.EndLabel();
         }
 
         cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));

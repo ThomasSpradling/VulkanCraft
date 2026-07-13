@@ -85,6 +85,9 @@ public:
 
     void SetDebugName(std::string_view name) const;
 
+    // Only used for reconciling with LAYOUT_UNDEFINED due to blitting this image with different image layouts
+    void SetLayout(VkImageLayout layout) { m_layout = layout; }
+
     // Memory must be managed by caller. Any parameters left empty
     // will be filled with reasonable defaults.
     VkImageView CreateImageView();

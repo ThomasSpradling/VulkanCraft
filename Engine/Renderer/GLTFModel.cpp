@@ -1,4 +1,5 @@
 #include "GLTFModel.h"
+#include "Core/Math.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/VulkanImage.h"
 #include <algorithm>
@@ -9,9 +10,20 @@
 #include <stdexcept>
 #include <variant>
 
+#include <mikktspace.h>
+
 // =================== //
 // ---- GLTF Node ---- //
 // =================== //
+
+void GLTFModel::Node::MarkDirty() {
+    global_dirty = true;
+    local_dirty = true;
+
+    for (auto &child : children) {
+        child->MarkDirty();
+    }
+}
 
 glm::dmat4 GLTFModel::Node::ComputeLocalTransform() {
     if (local_dirty) {
@@ -77,7 +89,12 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
         }
 
         if (!loaded) {
-            throw std::runtime_error("Failed to load GLTF file!");
+            throw std::runtime_error(std::format("Failed to load GLTF file '{}'.\nErrors: {}\nWarnings: {}",
+                    file_path.string(),
+                    errors.empty() ? "<none>" : errors,
+                    warnings.empty() ? "<none>" : warnings
+                )
+            );
         }
     }
 
@@ -130,14 +147,14 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
         return GPUMaterial {
             .color_factors = material.color_factors,
 
-            .albedo_texcoord = material.albedo_texcoord,
-            .normal_texcoord = normal_texture.unorm_texture_id,
-
             .albedo_texture = albedo_texture.srgb_texture_id,
             .albedo_sampler = albedo_texture.sampler_id,
-
-            .normal_texture = material.normal_texcoord,
+            .albedo_texcoord = material.albedo_texcoord,
+            
+            .normal_texture = normal_texture.unorm_texture_id,
             .normal_sampler = normal_texture.sampler_id,
+            .normal_texcoord = material.normal_texcoord,
+            .normal_texture_scale = material.normal_texture_scale,
         };
     });
 
@@ -225,7 +242,7 @@ void GLTFModel::LoadTextures(tinygltf::Model &model) {
                 .mipmapMode = GetVulkanMipmapMode(min_filter),
                 .addressModeU = GetVulkanWrapMode(sampler.wrapS),
                 .addressModeV = GetVulkanWrapMode(sampler.wrapT),
-                .maxLod = UseMipMaps(min_filter) ? VK_LOD_CLAMP_NONE : 0.25f,
+                .maxLod = UseMipMaps(min_filter) ? VK_LOD_CLAMP_NONE : 0.0f,
             };
 
             VkSampler vulkan_sampler;
@@ -317,11 +334,14 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
 
         m_materials.push_back(Material {
             .color_factors = glm::make_vec4(base_color.data()),
-            .albedo_texcoord = albedo_texcoord,
-            .normal_texcoord = normal_texcoord,
             .albedo_texture_index = static_cast<uint32_t>(albedo_texture_index),
+            .albedo_texcoord = albedo_texcoord,
             .normal_texture_index = static_cast<uint32_t>(normal_texture_index),
+            .normal_texcoord = normal_texcoord,
+            .normal_texture_scale = static_cast<float>(material.normalTexture.scale),
         });
+
+        std::cout << "TEXTURE SCALE: " << material.normalTexture.scale << "\n";
     }
 }
 
@@ -349,21 +369,20 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
         
         for (tinygltf::Primitive &primitive : mesh.primitives) {
             Assert(primitive.mode == TINYGLTF_MODE_TRIANGLES, "We currently only support triangle primitives!");
+            
+            std::vector<MeshVertex> primitive_vertices;
+            std::vector<uint32_t> primitive_indices;
 
-            Primitive new_primitive {
-                .start_index = static_cast<uint32_t>(data.indices.size()),
-                .index_count = 0,
-                .material_index = static_cast<uint32_t>(primitive.material + 1),
-            };
+            bool has_normals = primitive.attributes.contains("NORMAL");
+            bool generate_indices = primitive.indices == -1;
 
-            size_t initial_vertex = data.vertices.size();
+            const auto material_index = static_cast<uint32_t>(primitive.material + 1);
+            [[maybe_unused]] bool has_normal_texture = (material_index > 0) && (m_materials[material_index].normal_texture_index > 0);
 
             //// Indices ////
-            if (primitive.indices != -1) {
+            if (!generate_indices) {
                 tinygltf::Accessor &index_accessor = model.accessors[primitive.indices];
-                data.indices.reserve(data.indices.size() + index_accessor.count);
-
-                new_primitive.index_count = static_cast<uint32_t>(index_accessor.count);
+                primitive_indices.reserve(primitive_indices.size() + index_accessor.count);
 
                 IterateAccessor(model, index_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     uint32_t vertex_index;
@@ -377,7 +396,7 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                         throw std::runtime_error("Invalid triangle index!");
                     }
 
-                    data.indices.push_back(static_cast<uint32_t>(vertex_index + initial_vertex));
+                    primitive_indices.push_back(static_cast<uint32_t>(vertex_index));
                 });
             }
 
@@ -385,13 +404,9 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
             {
                 Assert(primitive.attributes.contains("POSITION"), "Cannot generate a GLTF mesh without positions!");
                 tinygltf::Accessor &position_accessor = model.accessors[primitive.attributes["POSITION"]];
-                data.vertices.resize(data.vertices.size() + position_accessor.count);
+                primitive_vertices.resize(primitive_vertices.size() + position_accessor.count);
 
                 // If indices have not been generated, we will generate them here manually
-                if (primitive.indices == -1) {
-                    new_primitive.index_count = static_cast<uint32_t>(position_accessor.count);
-                }
-
                 IterateAccessor(model, position_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<3, float>(value, accessor_type)) {
                         MeshVertex new_vertex {
@@ -405,10 +420,10 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                             .weights0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
                         };
 
-                        if (primitive.indices == -1) {
-                            data.indices.push_back(static_cast<uint32_t>(initial_vertex + i));
+                        if (generate_indices) {
+                            primitive_indices.push_back(static_cast<uint32_t>(i));
                         }
-                        data.vertices[initial_vertex + i] = new_vertex;
+                        primitive_vertices[i] = new_vertex;
                     } else {
                         throw std::runtime_error("Could not access position!");
                     }
@@ -416,11 +431,11 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
             }
 
             //// Normals ////
-            if (primitive.attributes.contains("NORMAL")) {
+            if (has_normals) {
                 tinygltf::Accessor &normal_accessor = model.accessors[primitive.attributes["NORMAL"]];
                 IterateAccessor(model, normal_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<3, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].normal = glm::normalize(*vec);
+                        primitive_vertices[i].normal = glm::normalize(*vec);
                     } else {
                         throw std::runtime_error("Could not access normal!");
                     }
@@ -428,11 +443,12 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
             }
 
             //// Tangents ////
-            if (primitive.attributes.contains("TANGENT")) {
+            bool has_tangents = primitive.attributes.contains("TANGNET");
+            if (has_tangents && has_normals) {
                 tinygltf::Accessor &tangent_accessor = model.accessors[primitive.attributes["TANGENT"]];
                 IterateAccessor(model, tangent_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<4, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].tangent = *vec;
+                        primitive_vertices[i].tangent = *vec;
                     } else {
                         throw std::runtime_error("Could not access tangent!");
                     }
@@ -444,7 +460,7 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 tinygltf::Accessor &uv_accessor = model.accessors[primitive.attributes["TEXCOORD_0"]];
                 IterateAccessor(model, uv_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<2, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].uv0 = *vec;
+                        primitive_vertices[i].uv0 = *vec;
                     } else {
                         throw std::runtime_error("Could not access UV0!");
                     }
@@ -455,7 +471,7 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 tinygltf::Accessor &uv_accessor = model.accessors[primitive.attributes["TEXCOORD_1"]];
                 IterateAccessor(model, uv_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<2, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].uv1 = *vec;
+                        primitive_vertices[i].uv1 = *vec;
                     } else {
                         throw std::runtime_error("Could not access UV1!");
                     }
@@ -467,9 +483,9 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 tinygltf::Accessor &color_accessor = model.accessors[primitive.attributes["COLOR_0"]];
                 IterateAccessor(model, color_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec3 = TryGetVector<3, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].color = glm::vec4(*vec3, 1.0f);
+                        primitive_vertices[i].color = glm::clamp(glm::vec4(*vec3, 1.0f), 0.0f, 1.0f);
                     } else if (auto vec4 = TryGetVector<4, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].color = *vec4;
+                        primitive_vertices[i].color = glm::clamp(*vec4, 0.0f, 1.0f);
                     } else {
                         throw std::runtime_error("Could not access color 0!");
                     }
@@ -481,9 +497,9 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 tinygltf::Accessor &color_accessor = model.accessors[primitive.attributes["JOINTS_0"]];
                 IterateAccessor(model, color_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto u8_vec = TryGetVector<4, uint8_t>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].joints0 = *u8_vec;
+                        primitive_vertices[i].joints0 = *u8_vec;
                     } else if (auto u16_vec = TryGetVector<4, uint16_t>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].joints0 = *u16_vec;
+                        primitive_vertices[i].joints0 = *u16_vec;
                     } else {
                         throw std::runtime_error("Could not access joint 0!");
                     }
@@ -495,14 +511,80 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 tinygltf::Accessor &weight_accessor = model.accessors[primitive.attributes["WEIGHTS_0"]];
                 IterateAccessor(model, weight_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
                     if (auto vec = TryGetVector<4, float>(value, accessor_type)) {
-                        data.vertices[initial_vertex + i].weights0 = *vec;
+                        primitive_vertices[i].weights0 = *vec;
                     } else {
                         throw std::runtime_error("Could not access weight 0!");
                     }
                 });
             }
 
-            constructed_mesh.primitives.push_back(new_primitive);
+            if (!has_normals) {
+                //// Generate flat normals ////
+                std::cout << "Could not find supplied vertex normals! Generating flat normals.\n";
+
+                std::vector<MeshVertex> replaced_vertices;
+                std::vector<uint32_t> replaced_indices;
+
+                replaced_vertices.reserve(primitive_indices.size());
+                replaced_indices.reserve(primitive_indices.size());
+
+                for (uint32_t i = 0; i < primitive_indices.size(); i += 3) {
+                    // For each triangle, calculate the flat normal
+
+                    MeshVertex v0 = primitive_vertices[primitive_indices[i]];
+                    MeshVertex v1 = primitive_vertices[primitive_indices[i + 1]];
+                    MeshVertex v2 = primitive_vertices[primitive_indices[i + 2]];
+
+                    glm::vec3 normal = glm::cross(v1.position - v0.position, v2.position - v0.position);
+                    if (NearlyEqual(normal, glm::vec3(0.0f)))
+                        normal = glm::vec3(0.0f, 0.0f, 1.0f);
+                    normal = glm::normalize(normal);
+
+                    v0.normal = normal;
+                    v1.normal = normal;
+                    v2.normal = normal;
+
+                    // Generate new vertices to avoid degenerate vertex normals
+                    auto first_index = static_cast<uint32_t>(replaced_vertices.size());
+
+                    replaced_indices.push_back(first_index + 0);
+                    replaced_indices.push_back(first_index + 1);
+                    replaced_indices.push_back(first_index + 2);
+
+                    replaced_vertices.push_back(v0);
+                    replaced_vertices.push_back(v1);
+                    replaced_vertices.push_back(v2);
+                }
+
+                primitive_indices = std::move(replaced_indices);
+                primitive_vertices = std::move(replaced_vertices);
+            }
+
+            if (!has_tangents) {
+                //// Generate tangents using MikkTSpace algorithm ////
+                std::cout << "Could not find supplied vertex tangents! Generating default tangents.\n";
+
+                uint32_t normal_uvs = m_materials[material_index].normal_texcoord;
+                GenerateTangents(primitive_vertices, primitive_indices, normal_uvs);
+            }
+
+            //// Push back to global data ////
+
+            const auto index_count = static_cast<uint32_t>(primitive_indices.size());
+            const auto initial_index = static_cast<uint32_t>(data.indices.size());
+            const auto initial_vertex = static_cast<uint32_t>(data.vertices.size());
+
+            std::ranges::transform(primitive_indices, primitive_indices.begin(), [initial_vertex](uint32_t local_index) {
+                return local_index + initial_vertex;
+            });
+            data.indices.insert(data.indices.begin(), primitive_indices.begin(), primitive_indices.end());
+            data.vertices.insert(data.vertices.begin(), primitive_vertices.begin(), primitive_vertices.end());
+
+            constructed_mesh.primitives.push_back(Primitive {
+                .start_index = initial_index,
+                .index_count = index_count,
+                .material_index = material_index,
+            });
         }
 
         current_node->mesh = constructed_mesh;
@@ -514,6 +596,95 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
         parent->children.push_back(current_node);
     }
     m_linear_nodes.push_back(current_node);
+}
+
+void GLTFModel::GenerateTangents(std::vector<MeshVertex> &primitive_vertices, std::vector<uint32_t> &primitive_indices, uint32_t uv_set) {
+    if (uv_set > 1) {
+        throw std::runtime_error("Could not generate tangents since only TEXCOORD_0 and TEXCOORD_1 are supported");
+    }
+
+    struct MikkUserData {
+        const std::vector<MeshVertex> *vertices;
+        const std::vector<uint32_t> *indices;
+        std::vector<glm::vec4> *out_tangents;
+        uint32_t uv_set;
+    };
+
+    std::vector<glm::vec4> tangents(primitive_indices.size());
+    MikkUserData user_data {
+        .vertices = &primitive_vertices,
+        .indices = &primitive_indices,
+        .out_tangents = &tangents,
+        .uv_set = uv_set,
+    };
+
+    SMikkTSpaceInterface inferface {
+        .m_getNumFaces = [](const SMikkTSpaceContext *context) -> int {
+            const auto *data = static_cast<const MikkUserData *>(context->m_pUserData);
+            return static_cast<int>(data->indices->size() / 3);
+        },
+        .m_getNumVerticesOfFace = [](const SMikkTSpaceContext *context, int) ->int {
+            return 3;
+        },
+        .m_getPosition = [](const SMikkTSpaceContext *context, float position_out[3], int face, int vert) {
+            const auto *data = static_cast<const MikkUserData *>(context->m_pUserData);
+            const uint32_t index = (*data->indices)[face * 3 + vert];
+
+            const glm::vec3 &position = (*data->vertices)[index].position;
+            position_out[0] = position.x;
+            position_out[1] = position.y;
+            position_out[2] = position.z;
+        },
+        .m_getNormal = [](const SMikkTSpaceContext *context, float normal_out[3], int face, int vert) {
+            const auto *data = static_cast<const MikkUserData *>(context->m_pUserData);
+            const uint32_t index = (*data->indices)[face * 3 + vert];
+
+            const glm::vec3 &normal = (*data->vertices)[index].normal;
+            normal_out[0] = normal.x;
+            normal_out[1] = normal.y;
+            normal_out[2] = normal.z;
+        },
+        .m_getTexCoord = [](const SMikkTSpaceContext *context, float uv_out[2], int face, int vert) {
+            const auto *data = static_cast<const MikkUserData *>(context->m_pUserData);
+            const uint32_t index = (*data->indices)[face * 3 + vert];
+            const MeshVertex &vertex = (*data->vertices)[index];
+
+            const glm::vec2 &uv = data->uv_set == 0 ? vertex.uv0 : vertex.uv1;
+            uv_out[0] = uv.x;
+            uv_out[1] = uv.y;
+        },
+        .m_setTSpaceBasic = [](const SMikkTSpaceContext *context, const float tangent[3], float sign, int face, int vert) {
+            const auto *data = static_cast<const MikkUserData *>(context->m_pUserData);
+            (*data->out_tangents)[face * 3 + vert] = glm::vec4(tangent[0], tangent[1], tangent[2], sign);
+        },
+    };
+
+    SMikkTSpaceContext context {
+        .m_pInterface = &inferface,
+        .m_pUserData = &user_data,
+    };
+
+    if (genTangSpaceDefault(&context) == 0) {
+        throw std::runtime_error("Failed to generate tangents!");
+    }
+
+    //// Generate new vertices to avoid degenerate tangents ////
+    std::vector<MeshVertex> replaced_vertices;
+    std::vector<uint32_t> replaced_indices;
+
+    replaced_vertices.reserve(primitive_indices.size());
+    replaced_indices.reserve(primitive_indices.size());
+
+    for (uint32_t i = 0; i < primitive_indices.size(); ++i) {
+        MeshVertex vertex = primitive_vertices[primitive_indices[i]];
+        vertex.tangent = tangents[i];
+
+        replaced_indices.push_back(static_cast<uint32_t>(replaced_vertices.size()));
+        replaced_vertices.push_back(vertex);
+    }
+
+    primitive_vertices = std::move(replaced_vertices);
+    primitive_indices = std::move(replaced_indices);
 }
 
 void GLTFModel::IterateAccessor(tinygltf::Model &model, tinygltf::Accessor &accessor, const std::function<void(uint32_t, std::vector<ComponentType>, int)> &callback) {

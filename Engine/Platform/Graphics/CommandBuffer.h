@@ -25,6 +25,7 @@ public:
     ImageBarrier &SourceStage(VkPipelineStageFlags2 stage);
     ImageBarrier &DestStage(VkPipelineStageFlags2 stage);
 
+    ImageBarrier &SourceLayout(VkImageLayout source_layout);
     ImageBarrier &TransitionLayout(VkImageLayout new_layout);
     ImageBarrier &SubresourceRange(const VkImageSubresourceRange &subresource);
 
@@ -43,8 +44,10 @@ private:
     VkPipelineStageFlags2 m_dst_stage = 0;
 
     VkImageLayout m_new_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout m_source_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageSubresourceRange m_subresource {};
     bool m_default_subresource = true;
+
 };
 
 
@@ -121,8 +124,10 @@ public:
     //// Utilities ////
 
     ImageBarrier ImageMemoryBarrier(VulkanImage &image) const;
-    void TransitionLayout(VulkanImage &image, VkImageLayout layout) const;
-    void TransitionLayout(VulkanImage &image, VkImageLayout layout, const VkImageSubresourceRange &range) const;
+    void TransitionLayout(VulkanImage &image, VkImageLayout target_layout) const;
+    
+    void TransitionLayout(VulkanImage &image, VkImageLayout target_layout, const VkImageSubresourceRange &range) const;
+    void TransitionLayout(VulkanImage &image, VkImageLayout source_layout, VkImageLayout target_layout, const VkImageSubresourceRange &range) const;
 
     void GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer = 0) const;
 private:

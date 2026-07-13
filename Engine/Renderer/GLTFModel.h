@@ -45,6 +45,7 @@ public:
         bool global_dirty = true;
         glm::dmat4 cached_global_transform { 1.0 };
 
+        void MarkDirty();
         glm::dmat4 ComputeLocalTransform();
         glm::dmat4 ComputeGlobalTransform();
         void Update();
@@ -54,6 +55,7 @@ public:
     ~GLTFModel();
 
     void Update();
+    void GetCameras();
 
     void ForEachNode(const std::function<void(Node &)> &callback);
     const VulkanBuffer &VertexBuffer() const { return *m_vertex_buffer; }
@@ -63,24 +65,25 @@ private:
     struct GPUMaterial {
         glm::vec4 color_factors;
 
-        uint32_t albedo_texcoord;
-        uint32_t normal_texcoord;
-
         TextureId albedo_texture;
         SamplerId albedo_sampler;
-
+        uint32_t albedo_texcoord;
+        
         TextureId normal_texture;
         SamplerId normal_sampler;
+        uint32_t normal_texcoord;
+        float normal_texture_scale;
     };
 
     struct Material {
         glm::vec4 color_factors {};
 
-        uint32_t albedo_texcoord = 0;
-        uint32_t normal_texcoord = 0;
-
         uint32_t albedo_texture_index = 0;
+        uint32_t albedo_texcoord = 0;
+        
         uint32_t normal_texture_index = 0;
+        uint32_t normal_texcoord = 0;
+        float normal_texture_scale = 1.0f;
     };
 
     struct MeshVertex {
@@ -133,6 +136,8 @@ private:
     void LoadTextures(tinygltf::Model &model);
     void LoadMaterials(tinygltf::Model &model);
     void LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &model, VertexData &data);
+
+    void GenerateTangents(std::vector<MeshVertex> &primitive_vertices, std::vector<uint32_t> &primitive_indices, uint32_t uv_set);
 
     // Callback runs over (index, accessor_value, accessor_value_type)
     void IterateAccessor(tinygltf::Model &model, tinygltf::Accessor &accessor, const std::function<void(uint32_t, std::vector<ComponentType>, int)> &callback);

@@ -11,7 +11,10 @@
 
 ShaderCompiler::ShaderCompiler(const std::filesystem::path &shader_search_path, std::span<const slang::PreprocessorMacroDesc> macros) {
     //// Create Global Session ////
-    if (SLANG_FAILED(slang::createGlobalSession(m_global_session.writeRef())))
+    SlangGlobalSessionDesc global_session_desc {
+        .enableGLSL = true,
+    };
+    if (SLANG_FAILED(slang::createGlobalSession(&global_session_desc, m_global_session.writeRef())))
         throw std::runtime_error("Failed to create global Slang session!");
 
     //// Preprocess File Paths ////

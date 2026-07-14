@@ -34,6 +34,11 @@ public:
         std::optional<Mesh> mesh = std::nullopt;
 
         // Local transforms
+        const glm::dvec3 initial_translation;
+        const glm::dquat initial_rotation;
+        const glm::dvec3 initial_scale;
+        const glm::dmat4 initial_matrix;
+
         glm::dvec3 translation {};
         glm::dquat rotation { 1.0, 0.0, 0.0, 0.0 };
         glm::dvec3 scale { 1.0 };
@@ -45,6 +50,7 @@ public:
         bool global_dirty = true;
         glm::dmat4 cached_global_transform { 1.0 };
 
+        Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix);
         void MarkDirty();
         glm::dmat4 ComputeLocalTransform();
         glm::dmat4 ComputeGlobalTransform();
@@ -54,8 +60,10 @@ public:
     GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_manager, const std::filesystem::path &file_path);
     ~GLTFModel();
 
-    void Update();
     void GetCameras();
+    
+    void PlayAnimation(uint32_t index, float time, bool loop = false);
+    void ResetPositions();
 
     void ForEachNode(const std::function<void(Node &)> &callback);
     const VulkanBuffer &VertexBuffer() const { return *m_vertex_buffer; }
@@ -107,6 +115,44 @@ private:
         bool needs_srgb = false;
         bool needs_unorm = false;
     };
+
+    enum class AnimationTarget : uint8_t {
+        None = 0,
+        Weights,
+        Translation,
+        Rotation,
+        Scale,
+    };
+
+    struct AnimationChannel {
+        uint32_t sampler_index = 0;
+        uint32_t node_index = 0;
+        AnimationTarget target = AnimationTarget::None;
+    };
+    
+    enum class AnimationInterpolation : uint8_t {
+        Linear = 0,
+        Step,
+        CubicSpline
+    };
+
+    using AnimationOutput = std::variant<glm::vec3, glm::quat, float>;
+    struct AnimationSampler {
+        AnimationInterpolation interpolation_method = AnimationInterpolation::Linear;
+        
+        std::vector<float> times {};
+        std::vector<AnimationOutput> output {};
+
+        AnimationOutput Sample(float current_time) const;
+    };
+
+    struct Animation {
+        std::string name {};
+        std::vector<AnimationChannel> channels {};
+        std::vector<AnimationSampler> samplers {};
+
+		float duration = 0.0f;
+    };
 private:
     using ComponentType = std::variant<int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, float>;
 private:
@@ -129,18 +175,21 @@ private:
     // Index zero is reserved as the default material
     std::vector<Material> m_materials {};
 
+    std::vector<Animation> m_animations {};
+
     std::unique_ptr<VulkanBuffer> m_vertex_buffer;
     std::unique_ptr<VulkanBuffer> m_index_buffer;
     std::unique_ptr<VulkanBuffer> m_material_buffer;
 private:
     void LoadTextures(tinygltf::Model &model);
     void LoadMaterials(tinygltf::Model &model);
-    void LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &model, VertexData &data);
+    void LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &model, VertexData &data);
+    void LoadAnimations(tinygltf::Model &model);
 
     void GenerateTangents(std::vector<MeshVertex> &primitive_vertices, std::vector<uint32_t> &primitive_indices, uint32_t uv_set);
 
     // Callback runs over (index, accessor_value, accessor_value_type)
-    void IterateAccessor(tinygltf::Model &model, tinygltf::Accessor &accessor, const std::function<void(uint32_t, std::vector<ComponentType>, int)> &callback);
+    void IterateAccessor(tinygltf::Model &model, tinygltf::Accessor &accessor, const std::function<void(uint32_t index, std::vector<ComponentType> value, int accessor_type)> &callback);
 
     template <typename T>
     std::optional<T> TryGetScalar(const std::vector<ComponentType> &accessor_value, int accessor_type);

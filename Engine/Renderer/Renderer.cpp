@@ -7,6 +7,7 @@
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanImage.h"
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <glm/ext/matrix_transform.hpp>
@@ -158,7 +159,7 @@ void Renderer::CreateObjects() {
     CreateSwapChainObjects();
 
     // Hardcoded Objects
-    std::filesystem::path gltf_path(ASSET_PATH "/models/DamagedHelmet.glb");
+    std::filesystem::path gltf_path(ASSET_PATH "/models/InterpolationTest.glb");
     m_model = std::make_unique<GLTFModel>(*m_device, *m_resource_manager, gltf_path);
 }
 
@@ -178,6 +179,19 @@ void Renderer::UpdateSceneData() {
     const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
 
     FrameContext &frame = m_frame_data[m_frame_index];
+
+    static auto previous_time = std::chrono::steady_clock::now();
+    [[maybe_unused]] static float animation_time = 0.0f;
+
+    const auto current_time = std::chrono::steady_clock::now();
+    const std::chrono::duration<float> delta = current_time - previous_time;
+    previous_time = current_time;
+
+    animation_time += delta.count();
+
+    for (uint32_t i = 0; i < 9; ++i) {
+        m_model->PlayAnimation(i, animation_time, true);
+    }
 
     //// Camera ////
     m_camera.SetAspect(extent.width, extent.height);
@@ -297,7 +311,8 @@ void Renderer::CreateTrianglePipeline() {
     Assert(m_triangle_shader, "Triangle shader was not compiled!");
 
     auto builder = VulkanPipeline::GraphicsBuilder(*m_device)
-        .AddShader(*m_triangle_shader)
+        .VertexShader(*m_triangle_shader, "main_vert")
+        .FragmentShader(*m_triangle_shader, "main_frag")
         
         .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .SetPolygonMode(VK_POLYGON_MODE_FILL)

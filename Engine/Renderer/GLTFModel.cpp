@@ -4,7 +4,10 @@
 #include "Platform/Graphics/VulkanImage.h"
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <glm/ext/quaternion_common.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -15,6 +18,22 @@
 // =================== //
 // ---- GLTF Node ---- //
 // =================== //
+
+// GLTFModel::Node(glm::dev3, );
+
+// GLTFModel::Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix)
+// {}
+
+GLTFModel::Node::Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix)
+    : initial_translation(initial_translation)
+    , initial_rotation(initial_rotation)
+    , initial_scale(initial_scale)
+    , initial_matrix(initial_matrix)
+    , translation(initial_translation)
+    , rotation(initial_rotation)
+    , scale(initial_scale)
+    , matrix(initial_matrix)
+{}
 
 void GLTFModel::Node::MarkDirty() {
     global_dirty = true;
@@ -60,6 +79,110 @@ void GLTFModel::Node::Update() {
     }
 }
 
+// =========================== //
+// ---- Animation Sampler ---- //
+// =========================== //
+
+GLTFModel::AnimationOutput GLTFModel::AnimationSampler::Sample(float current_time) const {
+    Assert(!times.empty(), "Cannot sample invalid animation!");
+
+    if (interpolation_method == AnimationInterpolation::CubicSpline) {
+        Assert(output.size() == 3 * times.size(), "Mismatching timestamps!");
+    } else {
+        Assert(output.size() == times.size(), "Mismatching timestamps!");
+    }
+
+    const auto value_at = [&](size_t key) -> const AnimationOutput & {
+        return interpolation_method == AnimationInterpolation::CubicSpline
+            ? output[key * 3 + 1]
+            : output[key];
+    };
+
+    if (current_time <= times.front())
+        return value_at(0);
+
+    if (current_time >= times.back())
+        return value_at(times.size() - 1);
+
+    float normalized_time = 0.0f;
+    uint32_t start_index = 0;
+    uint32_t end_index = 0;
+    float duration = 0.0f;
+
+    for (uint32_t i = 0; i < times.size(); ++i) {
+        if (i == times.size() - 1)
+            return value_at(i);
+
+        if (current_time == times[i])
+            return value_at(i);
+
+        if (current_time >= times[i] && current_time < times[i+1]) {
+            duration = times[i+1] - times[i];
+            normalized_time = (current_time - times[i]) / duration;
+            start_index = i;
+            end_index = i + 1;
+            break;
+        }
+    }
+
+    AnimationOutput start_value = value_at(start_index);
+    AnimationOutput end_value = value_at(end_index);
+
+    switch (interpolation_method) {
+        case AnimationInterpolation::Step: {
+            return start_value;
+        }
+        case AnimationInterpolation::Linear: {
+            return std::visit([&](const auto &start) -> AnimationOutput {
+                using T = std::decay_t<decltype(start)>;
+
+                const T *end = std::get_if<T>(&end_value);
+                if (!end)
+                    throw std::runtime_error("Animation output don't match!");
+
+                if constexpr (std::is_same_v<T, glm::quat>) {
+                    return glm::slerp(start, *end, normalized_time);
+                } else {
+                    return glm::mix(start, *end, normalized_time);
+                }
+            }, start_value);
+        }
+        case AnimationInterpolation::CubicSpline: {
+            AnimationOutput out_tangent = output[start_index * 3 + 2];
+            AnimationOutput in_tangent = output[end_index * 3 + 0];
+            
+            return std::visit([&](const auto &start) -> AnimationOutput {
+                using T = std::decay_t<decltype(start)>;
+
+                float t = normalized_time;
+
+                const T *end = std::get_if<T>(&end_value);
+                const T *in_tang = std::get_if<T>(&in_tangent);
+                const T *out_tang = std::get_if<T>(&out_tangent);
+                if (!end || !in_tang || !out_tang)
+                    throw std::runtime_error("Animation outputs do not match!");
+
+                const T b_start = *out_tang;
+                const T a_end = *in_tang;
+                const T v_start = start;
+                const T v_end = *end;
+                    
+                T result = (2*t*t*t - 3*t*t + 1) * v_start
+                    + duration * (t*t*t - 2*t*t + t) * b_start
+                    + (-2*t*t*t + 3*t*t) * v_end
+                    + duration * (t*t*t - t*t) * a_end;
+
+                if constexpr (std::is_same_v<T, glm::quat>) {
+                    result = glm::normalize(result);
+                }
+
+                return result;
+            }, start_value);
+        }
+    }
+
+    throw std::runtime_error("Could not interpolate with invalid interpolation method!");
+}
 
 // ==================== //
 // ---- GLTF Model ---- //
@@ -113,11 +236,12 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
     LoadTextures(model);
 
     VertexData data {};
+    m_linear_nodes.resize(model.nodes.size());
     m_root_nodes.reserve(scene.nodes.size());
     for (int root_node_index : scene.nodes) {
-        tinygltf::Node &root_node = model.nodes[root_node_index];
-        LoadNode(nullptr, root_node, model, data);
+        LoadNode(nullptr, root_node_index, model, data);
     }
+    LoadAnimations(model);
 
     for (auto &node : m_root_nodes) {
         node->Update();
@@ -173,15 +297,107 @@ GLTFModel::~GLTFModel() {
     m_material_buffer.reset();
 }
 
-void GLTFModel::Update() {
-    for (auto &node : m_root_nodes) {
-        node->Update();
+// void GLTFModel::Update() {
+//     for (auto &node : m_root_nodes) {
+//         node->Update();
+//     }
+// }
+
+void GLTFModel::PlayAnimation(uint32_t index, float time, bool loop) {
+    if (index >= m_animations.size()) {
+        throw std::runtime_error("Animation out of bounds!");
+    }
+    
+    const Animation &animation = m_animations[index];
+
+    if (loop) {
+        if (animation.duration > 0.0f) {
+            time = std::fmod(time, animation.duration);
+
+            if (time < 0.0f)
+                time += animation.duration;
+        } else {
+            time = 0.0f;
+        }
+    }
+
+    for (const AnimationChannel &channel : animation.channels) {
+        Assert(channel.sampler_index < animation.samplers.size(), "Invalid animation sampler!");
+
+        const AnimationSampler &sampler = animation.samplers[channel.sampler_index];
+
+        if (channel.node_index >= m_linear_nodes.size() || !m_linear_nodes[channel.node_index]) {
+            continue;
+        }
+        
+        AnimationOutput output = sampler.Sample(time);
+        Node &node = *m_linear_nodes[channel.node_index];
+        
+        switch(channel.target) {
+            case AnimationTarget::Translation: {
+                if (auto *translation = std::get_if<glm::vec3>(&output); translation != nullptr) {
+                    node.translation = *translation;
+                    node.MarkDirty();
+                } else {
+                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a translation!", time));
+                }
+                break;
+            }
+            case AnimationTarget::Rotation: {
+                if (auto *rotation = std::get_if<glm::quat>(&output); rotation != nullptr) {
+                    node.rotation = *rotation;
+                    node.MarkDirty();
+                } else {
+                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a rotation!", time));
+                }
+                break;
+            }
+            case AnimationTarget::Scale: {
+                if (auto *scale = std::get_if<glm::vec3>(&output); scale != nullptr) {
+                    node.scale = *scale;
+                    node.MarkDirty();
+                } else {
+                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a scale!", time));
+                }
+                break;
+            }
+            case AnimationTarget::Weights: {
+                if (auto *weight = std::get_if<float>(&output); weight != nullptr) {
+                    // nothing for now
+                } else {
+                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a weight!", time));
+                }
+                break;
+            }
+            case AnimationTarget::None:
+            default:
+                continue;
+        }
+    }
+
+    for (auto &root_node : m_root_nodes) {
+        root_node->Update();
+    }
+}
+
+void GLTFModel::ResetPositions() {
+    ForEachNode([](Node &node) {
+        node.matrix = node.initial_matrix;
+        node.rotation = node.initial_rotation;
+        node.translation = node.initial_translation;
+        node.scale = node.initial_scale;
+    });
+
+    for (auto &root_node : m_root_nodes) {
+        root_node->MarkDirty();
+        root_node->Update();
     }
 }
 
 void GLTFModel::ForEachNode(const std::function<void(Node &node)> &callback) {
     for (auto &node : m_linear_nodes) {
-        callback(*node);
+        if (node)
+            callback(*node);
     }
 }
 
@@ -345,22 +561,33 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
     }
 }
 
-void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &model, VertexData &data) {
-    std::shared_ptr<Node> current_node = std::make_shared<Node>();
-    current_node->parent = parent;
+void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &model, VertexData &data) {
+    if (node_index < 0 || static_cast<size_t>(node_index) >= model.nodes.size())
+        throw std::runtime_error("Canot load out of bounds node!");
+    
+    auto translation = glm::dvec3(0.0);
+    auto rotation = glm::dquat(1.0, 0.0, 0.0, 0.0);
+    auto scale = glm::dvec3(1.0);
+    auto matrix = glm::dmat4(1.0);
+
+    tinygltf::Node &node = model.nodes[node_index];
 
     if (node.translation.size() == 3)
-        current_node->translation = glm::make_vec3(node.translation.data());
+        translation = glm::make_vec3(node.translation.data());
     if (node.rotation.size() == 4)
-        current_node->rotation = glm::dquat::wxyz(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
+        rotation = glm::dquat::wxyz(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
     if (node.scale.size() == 3)
-        current_node->scale = glm::make_vec3(node.scale.data());
+        scale = glm::make_vec3(node.scale.data());
     if (node.matrix.size() == 16)
-        current_node->matrix = glm::make_mat4(node.matrix.data());
+        matrix = glm::make_mat4(node.matrix.data());
+
+    std::shared_ptr<Node> current_node = std::make_shared<Node>(translation, rotation, scale, matrix);
+    current_node->parent = parent;
+
+    m_linear_nodes[node_index] = current_node;
 
     for (auto &child_index : node.children) {
-        tinygltf::Node &child = model.nodes[child_index];
-        LoadNode(current_node.get(), child, model, data);
+        LoadNode(current_node.get(), child_index, model, data);
     }
 
     if (node.mesh != -1) {
@@ -377,8 +604,8 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
             bool generate_indices = primitive.indices == -1;
 
             const auto material_index = static_cast<uint32_t>(primitive.material + 1);
-            [[maybe_unused]] bool has_normal_texture = (material_index > 0) && (m_materials[material_index].normal_texture_index > 0);
-
+            bool has_normal_texture = (material_index > 0) && (m_materials[material_index].normal_texture_index > 0);
+        
             //// Indices ////
             if (!generate_indices) {
                 tinygltf::Accessor &index_accessor = model.accessors[primitive.indices];
@@ -441,9 +668,10 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                     }
                 });
             }
+            
 
             //// Tangents ////
-            bool has_tangents = primitive.attributes.contains("TANGNET");
+            bool has_tangents = primitive.attributes.contains("TANGENT");
             if (has_tangents && has_normals) {
                 tinygltf::Accessor &tangent_accessor = model.accessors[primitive.attributes["TANGENT"]];
                 IterateAccessor(model, tangent_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
@@ -560,7 +788,7 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
                 primitive_vertices = std::move(replaced_vertices);
             }
 
-            if (!has_tangents) {
+            if (!has_tangents && has_normal_texture && has_normals) {
                 //// Generate tangents using MikkTSpace algorithm ////
                 std::cout << "Could not find supplied vertex tangents! Generating default tangents.\n";
 
@@ -577,8 +805,8 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
             std::ranges::transform(primitive_indices, primitive_indices.begin(), [initial_vertex](uint32_t local_index) {
                 return local_index + initial_vertex;
             });
-            data.indices.insert(data.indices.begin(), primitive_indices.begin(), primitive_indices.end());
-            data.vertices.insert(data.vertices.begin(), primitive_vertices.begin(), primitive_vertices.end());
+            data.indices.insert(data.indices.end(), primitive_indices.begin(), primitive_indices.end());
+            data.vertices.insert(data.vertices.end(), primitive_vertices.begin(), primitive_vertices.end());
 
             constructed_mesh.primitives.push_back(Primitive {
                 .start_index = initial_index,
@@ -595,7 +823,124 @@ void GLTFModel::LoadNode(Node *parent, tinygltf::Node &node, tinygltf::Model &mo
     } else {
         parent->children.push_back(current_node);
     }
-    m_linear_nodes.push_back(current_node);
+}
+
+void GLTFModel::LoadAnimations(tinygltf::Model &model) {
+    std::cout << "The animations for this model are: \n";
+    for (uint32_t i = 0; i < model.animations.size(); ++i) {
+        std::cout << "[" << i << "] " << model.animations[i].name << "\n";
+    }
+
+    for (const auto &animation : model.animations) {
+        std::vector<AnimationChannel> channels {};
+        channels.reserve(animation.channels.size());
+
+        std::vector<AnimationSampler> samplers {};
+        samplers.reserve(animation.samplers.size());
+
+        float end = 0.0f;
+
+        for (const auto &channel : animation.channels) {
+            if (channel.target_node == -1 || static_cast<size_t>(channel.target_node) >= m_linear_nodes.size() || !m_linear_nodes[channel.target_node]) {
+                continue;
+            }
+
+            if (channel.sampler < 0 || static_cast<size_t>(channel.sampler) >= animation.samplers.size()) {
+                throw std::runtime_error("Animation channel sampler index is out of bounds!");
+            }
+
+            AnimationTarget target = AnimationTarget::None;
+            if (channel.target_path == "translation") {
+                target = AnimationTarget::Translation;
+            } else if (channel.target_path == "rotation") {
+                target = AnimationTarget::Rotation;
+            } else if (channel.target_path == "scale") {
+                target = AnimationTarget::Scale;
+            } else if (channel.target_path == "weights") {
+                target = AnimationTarget::Weights;
+                std::cerr << "Warning: Morph animations are not currently supported!\n";
+                continue;
+            } else {
+                std::cerr << "Warning: Invalid animation target '" << channel.target_path << "'\n";
+                continue;
+            }
+
+            if (target == AnimationTarget::None) {
+                std::cerr << "Warning: Attempted to target [None] for animation!\n";
+            }
+
+            channels.push_back(AnimationChannel{
+                .sampler_index = static_cast<uint32_t>(channel.sampler),
+                .node_index = static_cast<uint32_t>(channel.target_node),
+                .target = target,
+            });
+        }
+
+        for (auto &sampler : animation.samplers) {
+            AnimationInterpolation interpolation = AnimationInterpolation::Linear;
+            if (sampler.interpolation == "LINEAR") {
+                interpolation = AnimationInterpolation::Linear;
+            } else if (sampler.interpolation == "STEP") {
+                interpolation = AnimationInterpolation::Step;
+            } else if (sampler.interpolation == "CUBICSPLINE") {
+                interpolation = AnimationInterpolation::CubicSpline;
+            } else {
+                throw std::runtime_error(std::format("Invalid interpolation method '{}'.", sampler.interpolation));
+            }
+
+            tinygltf::Accessor &time_accessor = model.accessors[sampler.input];
+            tinygltf::Accessor &output_accessor = model.accessors[sampler.output];
+
+            std::vector<float> times;
+            times.resize(time_accessor.count);
+
+            IterateAccessor(model, time_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
+                if (auto time = TryGetScalar<float>(value, accessor_type)) {
+                    times[i] = *time;
+                } else {
+                    throw std::runtime_error("Time accessor for animation must contain floats!");
+                }
+            });
+
+            std::vector<AnimationOutput> output;
+            output.resize(output_accessor.count);
+
+            IterateAccessor(model, output_accessor, [&](uint32_t i, const std::vector<ComponentType> &value, int accessor_type) {
+                if (auto f = TryGetScalar<float>(value, accessor_type)) {
+                    // weights
+                    output[i] = *f;
+                } else if (auto vec3 = TryGetVector<3, float>(value, accessor_type)) {
+                    // translation / scale
+                    output[i] = *vec3;
+                } else if (auto vec4 = TryGetVector<4, float>(value, accessor_type)) {
+                    // rotation
+                    glm::vec4 rotation = *vec4;
+                    output[i] = glm::quat(rotation[3], rotation[0], rotation[1], rotation[2]);
+                } else {
+                    throw std::runtime_error("Invalid type for animation outputs!");
+                }
+            });
+
+            samplers.push_back(AnimationSampler {
+                .interpolation_method = interpolation,
+                .times = times,
+                .output = output,
+            });
+        }
+
+        for (const AnimationChannel &channel : channels) {
+            const AnimationSampler &sampler = samplers[channel.sampler_index];
+
+            end = std::max(end, sampler.times.back());
+        }
+
+        m_animations.push_back(Animation {
+            .name = animation.name,
+            .channels = channels,
+            .samplers = samplers,
+            .duration = end,
+        });
+    }
 }
 
 void GLTFModel::GenerateTangents(std::vector<MeshVertex> &primitive_vertices, std::vector<uint32_t> &primitive_indices, uint32_t uv_set) {

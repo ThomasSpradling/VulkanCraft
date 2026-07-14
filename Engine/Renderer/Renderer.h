@@ -98,9 +98,12 @@ private:
 
     // Rendering Data
     std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
+    std::unique_ptr<VulkanPipeline> m_debug_pipeline;
     std::unique_ptr<VulkanPipeline> m_wireframe_pipeline;
 
     std::optional<CompiledShader> m_triangle_shader;
+
+    std::vector<GLTFModel> m_models;
     std::unique_ptr<GLTFModel> m_model;
 
     PushConstantData m_push_constant;

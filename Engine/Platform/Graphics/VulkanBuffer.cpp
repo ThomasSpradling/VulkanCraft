@@ -1,6 +1,7 @@
 #include "VulkanBuffer.h"
 #include "Common.h"
 #include "Platform/Graphics/CommandBuffer.h"
+#include "Platform/Graphics/Common.h"
 #include "VulkanDevice.h"
 #include <cstring>
 #include <format>
@@ -68,6 +69,10 @@ std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build() {
     vk_buffer->m_memory_flags = m_memory_flags;
     vk_buffer->m_initialized = true;
     vk_buffer->m_queue_families = m_queue_families;
+
+    if (m_data != nullptr) {
+        vk_buffer->Upload(m_data, m_size);
+    }
 
     return vk_buffer;
 }

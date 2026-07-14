@@ -5,6 +5,7 @@
 #include "VulkanDevice.h"
 #include <initializer_list>
 #include <span>
+#include <type_traits>
 
 class VulkanBuffer;
 class VulkanBufferBuilder {
@@ -12,6 +13,7 @@ class VulkanBufferBuilder {
 public:
     VulkanBufferBuilder(const VulkanDevice &device) : m_device(device) {};
     VulkanBufferBuilder &Size(VkDeviceSize size);
+    
     VulkanBufferBuilder &AddUsage(VkBufferUsageFlags usage);
     VulkanBufferBuilder &AddMemoryFlags(VmaAllocationCreateFlags flag);
     
@@ -24,10 +26,21 @@ public:
 private:
     const VulkanDevice &m_device;
 
+    const void *m_data = nullptr;
     VkDeviceSize m_size = 0ull;
     VkBufferUsageFlags m_usage = 0;
     VmaAllocationCreateFlags m_memory_flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
     std::span<uint32_t> m_queue_families {}; // Queue families that may access this memory
+};
+
+enum class BufferUsage : uint8_t {
+    None        = 0,
+    Index       = 1 << 0,
+    Vertex      = 1 << 1,
+    Uniform     = 1 << 2,
+    Storage     = 1 << 3,
+    Indirect    = 1 << 4,
+    IndirectStorage = Storage | Indirect,
 };
 
 class VulkanBuffer : public NonCopyable {
@@ -58,7 +71,7 @@ public:
     
     // Upload data to index, viewing this buffer as an array<T>
     template <typename T>
-    void Upload(const T *data, uint32_t index) {
+    void UploadAt(const T *data, uint32_t index) {
         Upload(data, sizeof(T), sizeof(T) * index);
     }
 

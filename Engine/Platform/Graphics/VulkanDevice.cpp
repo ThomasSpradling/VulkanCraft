@@ -392,6 +392,8 @@ void VulkanDevice::CreateVulkanDevice() {
     VkPhysicalDeviceFeatures2 feat10 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .features = {
+            .geometryShader = VK_TRUE,
+            .tessellationShader = VK_TRUE,
             .depthBiasClamp = VK_TRUE,
             .fillModeNonSolid = VK_TRUE,
             .shaderInt16 = VK_TRUE,

@@ -15,6 +15,7 @@
 #include "Renderer/DebugRenderer.h"
 #include "Renderer/Renderer.h"
 #include "Renderer/Renderer2D.h"
+#include "Renderer/GLTFModel.h"
 
 #include "Platform/Sockets/SocketAPI.h"
 #include "Platform/Sockets/NetworkAddress.h"

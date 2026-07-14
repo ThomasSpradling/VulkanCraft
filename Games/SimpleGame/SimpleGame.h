@@ -18,6 +18,10 @@ private:
 
         glm::vec3 view_direction;
     };
+
+    struct Models {
+        std::unique_ptr<GLTFModel> model;
+    };
 private:
     Camera *m_camera;
     Player m_player;

@@ -5,6 +5,10 @@ add_subdirectory(Platform/Graphics)
 add_subdirectory(Platform/Sockets)
 
 add_subdirectory(Network)
+
+add_subdirectory(AssetManager)
+add_subdirectory(World)
+
 add_subdirectory(Renderer)
 
 add_subdirectory(Application/Client)

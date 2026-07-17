@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Network/NetworkHost.h"
+class NetworkHost;
 
 struct ServerContext {
     NetworkHost &server_host;

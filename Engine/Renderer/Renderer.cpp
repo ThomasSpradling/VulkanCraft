@@ -1,20 +1,24 @@
 #include "Renderer.h"
+#include "AssetManager/Material.h"
 #include "Common.h"
-#include "GLTFModel.h"
-#include "GPUResourceManager.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanImage.h"
+#include "World/DefaultComponents.h"
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <variant>
 #include <vector>
+#include "AssetManager/AssetManager.h"
+#include "AssetManager/GLTFModel.h"
 
 Renderer::Renderer(const Window &window)
     : m_window(window)
@@ -30,7 +34,7 @@ Renderer::Renderer(const Window &window)
 
     std::filesystem::path path(ASSET_PATH "/shaders");
     m_shader_compiler = std::make_unique<ShaderCompiler>(path);
-    m_resource_manager = std::make_unique<GPUResourceManager>(*m_device);
+    m_bindless_table = std::make_unique<BindlessDescriptorTable>(*m_device);
 
     CreateObjects();
 }
@@ -40,32 +44,14 @@ Renderer::~Renderer() {
 
     DestroyObjects();
 
-    m_resource_manager.reset();
+    m_bindless_table.reset();
+
     m_swapchain.reset();
     m_device.reset();
 }
 
-void Renderer::EnableVSync() {
-    if (m_enable_vsync)
-        return;
-
-    std::cout << "Enabled VSync\n";
-
-    m_enable_vsync = true;
-    RecreateSwapChain();
-}
-
-void Renderer::DisableVSync() {
-    if (!m_enable_vsync)
-        return;
-
-    std::cout << "Disabled VSync\n";
-
-    m_enable_vsync = false;
-    RecreateSwapChain();
-}
-
-void Renderer::DrawFrame() {
+void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions &options) {
+    //// Prepare Frame ////
     FrameContext &frame = m_frame_data[m_frame_index];
 
     frame.graphics_submit_fence->Wait();
@@ -74,15 +60,121 @@ void Renderer::DrawFrame() {
         RecreateSwapChain();
         return;
     }
-
-    SwapChainContext &swapchain_context = m_swapchain_data[*image_index];
-
+    
     frame.graphics_submit_fence->Reset();
     frame.command_pool->Reset();
+    
+    SwapChainContext &swapchain_context = m_swapchain_data[*image_index];
+    const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
 
-    UpdateSceneData();
-    RecordCommands(frame);
+    //// Configure Camera ////
 
+    auto &camera_projection = world.Get<CameraComponent>(camera);
+
+    auto projection_matrix = glm::mat4(1.0f);
+    const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    
+    if (const auto* persp = std::get_if<PerspectiveProjection>(&camera_projection)) {
+        projection_matrix = glm::perspectiveRH_ZO(persp->fov, aspect, persp->near_plane, persp->far_plane);
+    } else {
+        const auto &ortho = std::get<OrthographicProjection>(camera_projection);
+        
+        float half_height = ortho.vertical_size / 2.0f;
+        float half_width  = half_height * aspect;
+        projection_matrix = glm::orthoRH_ZO(-half_width, half_width, -half_height, half_height, ortho.near_plane, ortho.far_plane);
+    }
+
+    projection_matrix[1][1] *= -1.0f;
+
+    glm::mat4 view_matrix = glm::inverse(world.GlobalMatrix(camera));
+
+    //// Update Uniform Buffer ////
+
+    auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
+    data->projection = projection_matrix;
+    data->view = view_matrix;
+    data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
+    data->ambient = 0.1f;
+    m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
+
+    //// Draw ////
+
+    CommandBuffer &cmd = *frame.command_buffer;
+    VulkanImage &swapchain_image = m_swapchain->CurrentImage();
+    SwapChainContext &context = m_swapchain_data[m_swapchain->CurrentImageIndex()];
+
+    auto clear_color = glm::vec4(0.25f, 0.05f, 0.8f, 1.0f);
+
+    cmd.Begin();
+    cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
+
+    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
+
+    cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
+
+    std::vector<ImageAttachment> attachments {};
+    attachments.push_back({
+        .type = AttachmentType::Color,
+        .image = *context.draw_image,
+        .should_clear = true,
+        .clear_color = clear_color,
+    });
+    attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
+
+    cmd.BindPipeline(*m_triangle_pipeline);
+    cmd.BeginRendering(attachments);
+
+    m_push_constant.material_buffer = m_asset_manager->MaterialBuffer().DeviceAddress();
+    world.Each<ProceduralMeshComponent>([&](Entity entity, ProceduralMeshComponent &component) {
+        if (!component.visible)
+            return;
+
+        auto &mesh = m_asset_manager->GetMesh(component.mesh);
+        auto &material = m_asset_manager->GetMaterial(component.material);
+        m_push_constant.vertex_buffer = mesh.VertexBuffer().DeviceAddress();
+
+        cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
+
+        m_push_constant.model = world.GlobalMatrix(entity);
+        m_push_constant.material_id = material.material_index;
+
+        cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
+        cmd.DrawIndexed(mesh.IndexCount());
+    });
+
+    world.Each<GLTFMeshComponent>([&](Entity entity, GLTFMeshComponent &component) {
+        if (!component.visible)
+            return;
+
+        auto &gltf = m_asset_manager->GetGLTF(component.gltf);
+        m_push_constant.vertex_buffer = gltf.VertexBuffer().DeviceAddress();
+        cmd.BindIndexBuffer(gltf.IndexBuffer().Buffer());
+
+        const GLTFModel::Node &node = gltf.GetNode(component.node_index);
+        if (!node.mesh)
+            return;
+        m_push_constant.model = world.GlobalMatrix(entity);
+
+        for (const GLTFModel::Primitive &primitive : node.mesh->primitives) {
+            m_push_constant.material_id = primitive.material_index;
+            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
+            cmd.DrawIndexed(primitive.index_count, 1, primitive.start_index);
+        }
+    });
+    cmd.EndRendering();
+
+    cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
+        cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        cmd.CopyImage(*context.draw_image, swapchain_image);
+
+        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        cmd.EndLabel();
+    cmd.End();
+
+    //// Prepare for Next Frame ////
     QueueSubmitInfo submit_info {};
     submit_info.wait_semaphores.push_back({
         .semaphore = frame.image_available.get(),
@@ -107,23 +199,24 @@ void Renderer::DrawFrame() {
     m_frame_index = (m_frame_index + 1) % MaxFramesInFlight;
 }
 
-void Renderer::DrawGLTF(GLTFModel &model, const CommandBuffer &cmd) {
-    m_push_constant.material_buffer = model.MaterialBuffer().DeviceAddress();
-    m_push_constant.vertex_buffer = model.VertexBuffer().DeviceAddress();
+void Renderer::EnableVSync() {
+    if (m_enable_vsync)
+        return;
 
-    cmd.BindIndexBuffer(model.IndexBuffer().Buffer());
+    std::cout << "Enabled VSync\n";
 
-    model.ForEachNode([&](GLTFModel::Node &node) {
-        if (!node.mesh)
-            return;
+    m_enable_vsync = true;
+    RecreateSwapChain();
+}
 
-        m_push_constant.model = node.ComputeGlobalTransform();
-        for (auto &primitive : node.mesh->primitives) {
-            m_push_constant.material_id = primitive.material_index;
-            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
-            cmd.DrawIndexed(primitive.index_count, 1, primitive.start_index);
-        }
-    });
+void Renderer::DisableVSync() {
+    if (!m_enable_vsync)
+        return;
+
+    std::cout << "Disabled VSync\n";
+
+    m_enable_vsync = false;
+    RecreateSwapChain();
 }
 
 void Renderer::CreateObjects() {
@@ -157,106 +250,16 @@ void Renderer::CreateObjects() {
 
     CreateTrianglePipeline();
     CreateSwapChainObjects();
-
-    // Hardcoded Objects
-    std::filesystem::path gltf_path(ASSET_PATH "/models/InterpolationTest.glb");
-    m_model = std::make_unique<GLTFModel>(*m_device, *m_resource_manager, gltf_path);
 }
 
 void Renderer::DestroyObjects() {
     if (m_device)
         vkDeviceWaitIdle(m_device->Device());
 
-    m_model.reset();
-
     DestroyTrianglePipeline();
     DestroySwapChainObjects();
 
     m_frame_data.clear();
-}
-
-void Renderer::UpdateSceneData() {
-    const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
-
-    FrameContext &frame = m_frame_data[m_frame_index];
-
-    static auto previous_time = std::chrono::steady_clock::now();
-    [[maybe_unused]] static float animation_time = 0.0f;
-
-    const auto current_time = std::chrono::steady_clock::now();
-    const std::chrono::duration<float> delta = current_time - previous_time;
-    previous_time = current_time;
-
-    animation_time += delta.count();
-
-    for (uint32_t i = 0; i < 9; ++i) {
-        m_model->PlayAnimation(i, animation_time, true);
-    }
-
-    //// Camera ////
-    m_camera.SetAspect(extent.width, extent.height);
-
-    //// Update Uniform Buffer ////
-    auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
-    data->projection = m_camera.ComputeProjectionMatrix();
-    data->view = m_camera.ComputeViewMatrix();
-    data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-    data->ambient = 0.1f;
-    m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
-}
-
-void Renderer::RecordCommands(const FrameContext &frame) {
-    CommandBuffer &cmd = *frame.command_buffer;
-    VulkanImage &swapchain_image = m_swapchain->CurrentImage();
-    SwapChainContext &context = m_swapchain_data[m_swapchain->CurrentImageIndex()];
-
-    auto clear_color = glm::vec4(0.25f, 0.05f, 0.8f, 1.0f);
-    const VkExtent3D extent = swapchain_image.Extent();
-
-    cmd.Begin();
-        cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
-
-        cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_resource_manager->GlobalDescriptorSet());
-
-        cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-        cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
-
-        {
-            std::vector<ImageAttachment> attachments {};
-            attachments.push_back({
-                .type = AttachmentType::Color,
-                .image = *context.draw_image,
-                .should_clear = true,
-                .clear_color = clear_color,
-            });
-            attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
-
-            cmd.BeginLabel("Draw Model", glm::vec4(0.2f, 0.8f, 0.2f, 1.0f));
-            cmd.BindPipeline(*m_triangle_pipeline);
-            cmd.BeginRendering(attachments);
-                DrawGLTF(*m_model, cmd);
-            cmd.EndRendering();
-            cmd.EndLabel();
-
-            // attachments[0].should_clear = false;
-            // attachments[1].should_clear = false;
-            // cmd.BeginLabel("Draw Wireframe", glm::vec4(0.4f, 0.4f, 0.4f, 1.0f));
-            // cmd.BindPipeline(*m_wireframe_pipeline);
-            // cmd.BeginRendering(attachments);
-            //     DrawGLTF(*m_model, cmd);
-            // cmd.EndRendering();
-            // cmd.EndLabel();
-        }
-
-        cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
-        cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        cmd.CopyImage(*context.draw_image, swapchain_image);
-
-        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-        cmd.EndLabel();
-    cmd.End();
 }
 
 void Renderer::CreateSwapChainObjects() {
@@ -325,7 +328,7 @@ void Renderer::CreateTrianglePipeline() {
         })
         .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat())
         .AddPushConstant(range)
-        .AddDescriptorSetLayout(m_resource_manager->GlobalDescriptorLayout())
+        .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
         .SetSpecializationConstants(specialization_info);
 
     if (m_triangle_pipeline)

@@ -1,8 +1,8 @@
-#include "GPUResourceManager.h"
+#include "BindlessDescriptorTable.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include <iostream>
 
-GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
+BindlessDescriptorTable::BindlessDescriptorTable(const VulkanDevice &device)
     : m_device(device)
 {
     //// Descriptor Pool ////
@@ -89,7 +89,7 @@ GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
 
     //// Add Default Texture ////
     std::array<glm::u8vec4, 1> default_pixels {
-        glm::u8vec4(180, 180, 180, 255)
+        glm::u8vec4(180, 0, 0, 255)
     };
 
     auto default_texture = VulkanImage::ImageBuilder(m_device)
@@ -147,7 +147,7 @@ GPUResourceManager::GPUResourceManager(const VulkanDevice &device)
     WriteSampler(0, m_samplers[DefaultSamplerId]);
 }
 
-GPUResourceManager::~GPUResourceManager() {
+BindlessDescriptorTable::~BindlessDescriptorTable() {
     std::cout << "Destroying GPU resource manager.\n";
     for (auto &texture : m_textures) {
         texture.reset();
@@ -173,35 +173,93 @@ GPUResourceManager::~GPUResourceManager() {
     }
 }
 
-TextureId GPUResourceManager::AddTexture(std::unique_ptr<VulkanImage> &image) {
+TextureId BindlessDescriptorTable::AddTexture(std::unique_ptr<VulkanImage> &image) {
     TextureId id = m_texture_ids.Acquire();
     WriteTexture(id, *image);
     m_textures[id] = std::move(image);
     return id;
 }
 
-SamplerId GPUResourceManager::AddSampler(VkSampler sampler) {
+SamplerId BindlessDescriptorTable::AddSampler(VkSampler sampler) {
     SamplerId id = m_sampler_ids.Acquire();
     WriteSampler(id, sampler);
     m_samplers[id] = sampler;
     return id;
 }
 
-StorageImageId GPUResourceManager::AddStorageImage(std::unique_ptr<VulkanImage> &image) {
+StorageImageId BindlessDescriptorTable::AddStorageImage(std::unique_ptr<VulkanImage> &image) {
     StorageImageId id = m_storage_image_ids.Acquire();
     WriteStorageImage(id, *image);
     m_storage_images[id] = std::move(image);
     return id;
 }
 
-AccelerationStructureId GPUResourceManager::AddAccelerationStructure(VkAccelerationStructureKHR acceleration_structure) {
+AccelerationStructureId BindlessDescriptorTable::AddAccelerationStructure(VkAccelerationStructureKHR acceleration_structure) {
     AccelerationStructureId id = m_acceleration_structure_ids.Acquire();
     WriteAccelerationStructure(id, acceleration_structure);
     m_acceleration_structures[id] = acceleration_structure;
     return id;
 }
 
-void GPUResourceManager::WriteTexture(TextureId id, const VulkanImage &image) {
+VulkanImage &BindlessDescriptorTable::GetTexture(TextureId id) {
+    Assert(id < MaxTextures && m_textures[id], "Invalid texture ID");
+    return *m_textures[id];
+}
+
+VkSampler BindlessDescriptorTable::GetSampler(SamplerId id) {
+    Assert(id < MaxTextures && m_textures[id], "Invalid sampler ID");
+    return m_samplers[id];
+}
+
+VulkanImage &BindlessDescriptorTable::GetStorageImage(StorageImageId id) {
+    Assert(id < MaxStorageImages && m_storage_images[id], "Invalid storage image ID");
+    return *m_storage_images[id];
+}
+
+VkAccelerationStructureKHR BindlessDescriptorTable::GetAccelerationStructure(AccelerationStructureId id) {
+    Assert(id < MaxAccelerationStructures && m_acceleration_structures[id] != VK_NULL_HANDLE, "Invalid acceleration structure ID");
+    return m_acceleration_structures[id];
+}
+
+void BindlessDescriptorTable::RemoveTexture(TextureId id) {
+    Assert(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
+    Assert(m_textures[id], "Texture slot is empty");
+
+    WriteTexture(id, *m_textures[DefaultTextureId]);
+    m_textures[id].reset();
+    m_texture_ids.Release(id);
+}
+
+void BindlessDescriptorTable::RemoveSampler(SamplerId id) {
+    Assert(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
+    Assert(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
+
+    WriteSampler(id, m_samplers[DefaultSamplerId]);
+    vkDestroySampler(m_device.Device(), m_samplers[id], nullptr);
+    m_samplers[id] = VK_NULL_HANDLE;
+    m_sampler_ids.Release(id);
+}
+
+void BindlessDescriptorTable::ReplaceTexture(TextureId id, std::unique_ptr<VulkanImage> image) {
+    Assert(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
+    Assert(m_textures[id], "Texture slot is empty");
+    Assert(image, "Cannot replace a texture with null");
+
+    WriteTexture(id, *image);
+    m_textures[id] = std::move(image);
+}
+
+void BindlessDescriptorTable::ReplaceSampler(SamplerId id, VkSampler sampler) {
+    Assert(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
+    Assert(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
+    Assert(sampler != VK_NULL_HANDLE, "Cannot replace a sampler with null");
+
+    WriteSampler(id, sampler);
+    vkDestroySampler(m_device.Device(), m_samplers[id], nullptr);
+    m_samplers[id] = sampler;
+}
+
+void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &image) {
     Assert(id < MaxTextures, "Invalid texture ID!");
     Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
     
@@ -224,7 +282,7 @@ void GPUResourceManager::WriteTexture(TextureId id, const VulkanImage &image) {
     vkUpdateDescriptorSets(m_device.Device(), 1, &write, 0, nullptr);
 }
 
-void GPUResourceManager::WriteSampler(SamplerId id, VkSampler sampler) {
+void BindlessDescriptorTable::WriteSampler(SamplerId id, VkSampler sampler) {
     Assert(id < MaxSamplers, "Invalid texture ID!");
     Assert(sampler, "Mut have a valid sampler!");
     
@@ -247,7 +305,7 @@ void GPUResourceManager::WriteSampler(SamplerId id, VkSampler sampler) {
     vkUpdateDescriptorSets(m_device.Device(), 1, &write, 0, nullptr);
 }
 
-void GPUResourceManager::WriteStorageImage(StorageImageId id, const VulkanImage &image) {
+void BindlessDescriptorTable::WriteStorageImage(StorageImageId id, const VulkanImage &image) {
     Assert(id < MaxStorageImages, "Invalid storage image ID!");
     Assert(image.Layout() == VK_IMAGE_LAYOUT_GENERAL, "Cannot write to storage image without GENERAL layout!");
     Assert(image.Usage() & VK_IMAGE_USAGE_STORAGE_BIT, "Cannot write to storage image using non-storage image.");
@@ -272,7 +330,7 @@ void GPUResourceManager::WriteStorageImage(StorageImageId id, const VulkanImage 
 }
 
 
-void GPUResourceManager::WriteAccelerationStructure(AccelerationStructureId id, VkAccelerationStructureKHR acceleration_structure) {
+void BindlessDescriptorTable::WriteAccelerationStructure(AccelerationStructureId id, VkAccelerationStructureKHR acceleration_structure) {
     Assert(id < MaxAccelerationStructures, "Invalid storage image ID!");
     
     VkWriteDescriptorSetAccelerationStructureKHR acceleration_structure_info {

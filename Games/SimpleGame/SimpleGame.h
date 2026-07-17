@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Application/Client/ClientContext.h"
 #include <Engine/Client.h>
 
 class SimpleGame : public IClientGame {
@@ -17,17 +18,15 @@ private:
         float pitch;
 
         glm::vec3 view_direction;
-    };
-
-    struct Models {
-        std::unique_ptr<GLTFModel> model;
+        Entity player = Entity::Invalid();
     };
 private:
-    Camera *m_camera;
+    Entity m_camera;
     Player m_player;
 
     const float MouseSensitivity = 0.2f;
     const float PlayerSpeed = 5.0f; // units / sec
 private:
+    void CreatePlayer(ClientContext &context);
     void HandleInputs(double delta_time, InputHandler &input_handler);
 };

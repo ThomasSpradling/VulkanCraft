@@ -7,6 +7,10 @@
 
 #include "Network/NetworkHost.h"
 #include "Platform/Sockets/SocketAPI.h"
+#include "Renderer/Renderer.h"
+#include "AssetManager/AssetManager.h"
+#include "World/World.h"
+#include "AssetManager/GLTFModel.h"
 
 ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig &config)
     : m_game(game)
@@ -18,8 +22,13 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
 
     m_target_fps = config.target_fps;
     m_update_rate = config.update_rate;
-
+    
     m_renderer = std::make_unique<Renderer>(*m_window);
+    m_asset_manager = std::make_unique<AssetManager>(m_renderer->Device(), m_renderer->BindlessTable());
+    m_renderer->AttachAssetManager(*m_asset_manager);
+
+    m_world = std::make_unique<World>(*m_asset_manager);
+
     m_input_handler = std::make_unique<InputHandler>(*m_window);
 
     m_socket_api = std::make_unique<SocketAPI>();
@@ -31,10 +40,12 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
 ClientApplication::~ClientApplication() {
     m_network_host.reset();
     m_socket_api.reset();
-
     m_input_handler.reset();
-    m_renderer.reset();
 
+    m_world.reset();
+    m_asset_manager.reset();
+    
+    m_renderer.reset();
     m_window.reset();
 
     std::cout << "Destroyed ClientApplication!\n";
@@ -59,10 +70,11 @@ void ClientApplication::Run() {
         .input_handler = *m_input_handler,
         .renderer = *m_renderer,
         .client_host = *m_network_host,
+        .world = *m_world,
+        .assets = *m_asset_manager,
     };
 
     m_running = true;
-
     m_game.Initialize(context);
     while (m_running) {
         if (m_window->ShouldClose()) {
@@ -88,16 +100,15 @@ void ClientApplication::Run() {
         }
 
         while (update_accum >= UPDATE_STEP_TIME) {
-            m_game.Update(UPDATE_STEP_TIME, context);
-            m_input_handler->Update();
+            Update(UPDATE_STEP_TIME, context);
             update_accum -= UPDATE_STEP_TIME;
         }
 
         if (!HAS_CAPPED_FPS) {
-            m_game.Render(frame_time, context);
+            Render(frame_time, context);
             frame_count++;
         } else if (const double render_step_time = 1000.0 / m_target_fps.value(); render_accum >= render_step_time) {
-            m_game.Render(render_step_time, context);
+            Render(render_step_time, context);
             frame_count++;
             render_accum -= render_step_time;
 
@@ -117,5 +128,19 @@ void ClientApplication::Run() {
             fps_timer = 0.0;
         }
     }
+
+    if (m_renderer) {
+        vkDeviceWaitIdle(m_renderer->Device().Device());
+    }
     m_game.ShutDown(context);
+}
+
+void ClientApplication::Update(double delta_time, ClientContext &context) {
+    m_game.Update(delta_time, context);
+    m_world->Update();
+    m_input_handler->Update();
+}
+
+void ClientApplication::Render(double delta_time, ClientContext &context) {
+    m_game.Render(delta_time, context);
 }

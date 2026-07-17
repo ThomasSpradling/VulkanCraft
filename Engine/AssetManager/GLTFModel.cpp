@@ -1,7 +1,10 @@
 #include "GLTFModel.h"
+#include "Core/Handle.h"
 #include "Core/Math.h"
+#include "Material.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/VulkanImage.h"
+#include "Texture.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -13,70 +16,33 @@
 #include <stdexcept>
 #include <variant>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
+
 #include <mikktspace.h>
 
 // =================== //
 // ---- GLTF Node ---- //
 // =================== //
 
-// GLTFModel::Node(glm::dev3, );
+std::tuple<glm::vec3, glm::quat, glm::vec3> GLTFModel::Node::CalculateTRS() const {
+    if (matrix == glm::mat4(1.0f))
+        return std::make_tuple(translation, rotation, scale);
+    
+    glm::mat4 translation_matrix = glm::translate(glm::mat4(1.0f), translation);
+    glm::mat4 rotation_matrix = glm::mat4(rotation);
+    glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), scale);
 
-// GLTFModel::Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix)
-// {}
+    glm::mat4 total_matrix = translation_matrix * rotation_matrix * scale_matrix * matrix;
 
-GLTFModel::Node::Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix)
-    : initial_translation(initial_translation)
-    , initial_rotation(initial_rotation)
-    , initial_scale(initial_scale)
-    , initial_matrix(initial_matrix)
-    , translation(initial_translation)
-    , rotation(initial_rotation)
-    , scale(initial_scale)
-    , matrix(initial_matrix)
-{}
+    glm::vec3 actual_translation;
+    glm::quat actual_rotation;
+    glm::vec3 actual_scale;
+    glm::vec3 skew;
+    glm::vec4 perspective;
+    glm::decompose(total_matrix, actual_scale, actual_rotation, actual_translation, skew, perspective);
 
-void GLTFModel::Node::MarkDirty() {
-    global_dirty = true;
-    local_dirty = true;
-
-    for (auto &child : children) {
-        child->MarkDirty();
-    }
-}
-
-glm::dmat4 GLTFModel::Node::ComputeLocalTransform() {
-    if (local_dirty) {
-        cached_local_transform = glm::translate(glm::dmat4(1.0), translation)
-            * glm::dmat4(rotation)
-            * glm::scale(glm::dmat4(1.0), scale)
-            * matrix;
-        local_dirty = false;
-        return cached_local_transform;
-    } else {
-        return cached_local_transform;
-    }
-}
-
-glm::dmat4 GLTFModel::Node::ComputeGlobalTransform() {
-    if (global_dirty) {
-        Node *p = parent;
-        cached_global_transform = ComputeLocalTransform();
-        while (p) {
-            cached_global_transform = p->ComputeLocalTransform() * cached_global_transform;
-            p = p->parent;
-        }
-        global_dirty = false;
-        return cached_global_transform;
-    } else {
-        return cached_global_transform;
-    }
-}
-
-void GLTFModel::Node::Update() {
-    ComputeGlobalTransform();
-    for (auto &child : children) {
-        child->Update();
-    }
+    return std::make_tuple(actual_translation, actual_rotation, actual_scale);
 }
 
 // =========================== //
@@ -188,9 +154,9 @@ GLTFModel::AnimationOutput GLTFModel::AnimationSampler::Sample(float current_tim
 // ---- GLTF Model ---- //
 // ==================== //
 
-GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_manager, const std::filesystem::path &file_path)
+GLTFModel::GLTFModel(const VulkanDevice &device, AssetManager &asset_manager, const std::filesystem::path &file_path)
     : m_device(device)
-    , m_resource_manager(resource_manager)
+    , m_asset_manager(asset_manager)
 {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -230,10 +196,7 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
     Assert(model.scenes.size() >= 1, "There are no scenes!");
     const tinygltf::Scene &scene = model.scenes[model.defaultScene == -1 ? 0 : model.defaultScene];
 
-    // Handle default texture + all GLTF textures
-    m_textures.resize(model.textures.size() + 1);
     LoadMaterials(model);
-    LoadTextures(model);
 
     VertexData data {};
     m_linear_nodes.resize(model.nodes.size());
@@ -242,10 +205,6 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
         LoadNode(nullptr, root_node_index, model, data);
     }
     LoadAnimations(model);
-
-    for (auto &node : m_root_nodes) {
-        node->Update();
-    }
 
     m_vertex_buffer = VulkanBuffer::BufferBuilder(m_device)
         .Size(data.vertices.size() * sizeof(MeshVertex))
@@ -261,138 +220,103 @@ GLTFModel::GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_ma
         .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
         .Build();
     m_index_buffer->Upload(data.indices);
-
-    std::vector<GPUMaterial> device_materials;
-    device_materials.resize(m_materials.size());
-    std::ranges::transform(m_materials, device_materials.begin(), [this](const Material &material) {
-        const Texture &albedo_texture = m_textures[material.albedo_texture_index];
-        const Texture &normal_texture = m_textures[material.normal_texture_index];
-
-        return GPUMaterial {
-            .color_factors = material.color_factors,
-
-            .albedo_texture = albedo_texture.srgb_texture_id,
-            .albedo_sampler = albedo_texture.sampler_id,
-            .albedo_texcoord = material.albedo_texcoord,
-            
-            .normal_texture = normal_texture.unorm_texture_id,
-            .normal_sampler = normal_texture.sampler_id,
-            .normal_texcoord = material.normal_texcoord,
-            .normal_texture_scale = material.normal_texture_scale,
-        };
-    });
-
-    m_material_buffer = VulkanBuffer::BufferBuilder(m_device)
-        .Size(device_materials.size() * sizeof(GPUMaterial))
-        .AddUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-        .Build();
-    m_material_buffer->Upload(device_materials);
 }
 
 GLTFModel::~GLTFModel() {
     m_vertex_buffer.reset();
     m_index_buffer.reset();
-    m_material_buffer.reset();
 }
 
-// void GLTFModel::Update() {
-//     for (auto &node : m_root_nodes) {
-//         node->Update();
+// void GLTFModel::PlayAnimation(uint32_t index, float time, bool loop) {
+//     if (index >= m_animations.size()) {
+//         throw std::runtime_error("Animation out of bounds!");
+//     }
+    
+//     const Animation &animation = m_animations[index];
+
+//     if (loop) {
+//         if (animation.duration > 0.0f) {
+//             time = std::fmod(time, animation.duration);
+
+//             if (time < 0.0f)
+//                 time += animation.duration;
+//         } else {
+//             time = 0.0f;
+//         }
+//     }
+
+//     for (const AnimationChannel &channel : animation.channels) {
+//         Assert(channel.sampler_index < animation.samplers.size(), "Invalid animation sampler!");
+
+//         const AnimationSampler &sampler = animation.samplers[channel.sampler_index];
+
+//         if (channel.node_index >= m_linear_nodes.size() || !m_linear_nodes[channel.node_index]) {
+//             continue;
+//         }
+        
+//         AnimationOutput output = sampler.Sample(time);
+//         Node &node = *m_linear_nodes[channel.node_index];
+        
+//         switch(channel.target) {
+//             case AnimationTarget::Translation: {
+//                 if (auto *translation = std::get_if<glm::vec3>(&output); translation != nullptr) {
+//                     node.translation = *translation;
+//                     node.MarkDirty();
+//                 } else {
+//                     throw std::runtime_error(std::format("Cannot sample animation output at time {} as a translation!", time));
+//                 }
+//                 break;
+//             }
+//             case AnimationTarget::Rotation: {
+//                 if (auto *rotation = std::get_if<glm::quat>(&output); rotation != nullptr) {
+//                     node.rotation = *rotation;
+//                     node.MarkDirty();
+//                 } else {
+//                     throw std::runtime_error(std::format("Cannot sample animation output at time {} as a rotation!", time));
+//                 }
+//                 break;
+//             }
+//             case AnimationTarget::Scale: {
+//                 if (auto *scale = std::get_if<glm::vec3>(&output); scale != nullptr) {
+//                     node.scale = *scale;
+//                     node.MarkDirty();
+//                 } else {
+//                     throw std::runtime_error(std::format("Cannot sample animation output at time {} as a scale!", time));
+//                 }
+//                 break;
+//             }
+//             case AnimationTarget::Weights: {
+//                 if (auto *weight = std::get_if<float>(&output); weight != nullptr) {
+//                     // nothing for now
+//                 } else {
+//                     throw std::runtime_error(std::format("Cannot sample animation output at time {} as a weight!", time));
+//                 }
+//                 break;
+//             }
+//             case AnimationTarget::None:
+//             default:
+//                 continue;
+//         }
+//     }
+
+//     for (auto &root_node : m_root_nodes) {
+//         root_node->Update();
 //     }
 // }
 
-void GLTFModel::PlayAnimation(uint32_t index, float time, bool loop) {
-    if (index >= m_animations.size()) {
-        throw std::runtime_error("Animation out of bounds!");
-    }
-    
-    const Animation &animation = m_animations[index];
+// void GLTFModel::ResetPositions() {
+//     ForEachNode([](Node &node) {
+//         node.matrix = node.initial_matrix;
+//         node.rotation = node.initial_rotation;
+//         node.translation = node.initial_translation;
+//         node.scale = node.initial_scale;
+//     });
 
-    if (loop) {
-        if (animation.duration > 0.0f) {
-            time = std::fmod(time, animation.duration);
-
-            if (time < 0.0f)
-                time += animation.duration;
-        } else {
-            time = 0.0f;
-        }
-    }
-
-    for (const AnimationChannel &channel : animation.channels) {
-        Assert(channel.sampler_index < animation.samplers.size(), "Invalid animation sampler!");
-
-        const AnimationSampler &sampler = animation.samplers[channel.sampler_index];
-
-        if (channel.node_index >= m_linear_nodes.size() || !m_linear_nodes[channel.node_index]) {
-            continue;
-        }
-        
-        AnimationOutput output = sampler.Sample(time);
-        Node &node = *m_linear_nodes[channel.node_index];
-        
-        switch(channel.target) {
-            case AnimationTarget::Translation: {
-                if (auto *translation = std::get_if<glm::vec3>(&output); translation != nullptr) {
-                    node.translation = *translation;
-                    node.MarkDirty();
-                } else {
-                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a translation!", time));
-                }
-                break;
-            }
-            case AnimationTarget::Rotation: {
-                if (auto *rotation = std::get_if<glm::quat>(&output); rotation != nullptr) {
-                    node.rotation = *rotation;
-                    node.MarkDirty();
-                } else {
-                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a rotation!", time));
-                }
-                break;
-            }
-            case AnimationTarget::Scale: {
-                if (auto *scale = std::get_if<glm::vec3>(&output); scale != nullptr) {
-                    node.scale = *scale;
-                    node.MarkDirty();
-                } else {
-                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a scale!", time));
-                }
-                break;
-            }
-            case AnimationTarget::Weights: {
-                if (auto *weight = std::get_if<float>(&output); weight != nullptr) {
-                    // nothing for now
-                } else {
-                    throw std::runtime_error(std::format("Cannot sample animation output at time {} as a weight!", time));
-                }
-                break;
-            }
-            case AnimationTarget::None:
-            default:
-                continue;
-        }
-    }
-
-    for (auto &root_node : m_root_nodes) {
-        root_node->Update();
-    }
-}
-
-void GLTFModel::ResetPositions() {
-    ForEachNode([](Node &node) {
-        node.matrix = node.initial_matrix;
-        node.rotation = node.initial_rotation;
-        node.translation = node.initial_translation;
-        node.scale = node.initial_scale;
-    });
-
-    for (auto &root_node : m_root_nodes) {
-        root_node->MarkDirty();
-        root_node->Update();
-    }
-}
+//     for (auto &root_node : m_root_nodes) {
+//         root_node->MarkDirty();
+//         root_node->Update();
+//     }
+// }
 
 void GLTFModel::ForEachNode(const std::function<void(Node &node)> &callback) {
     for (auto &node : m_linear_nodes) {
@@ -401,29 +325,93 @@ void GLTFModel::ForEachNode(const std::function<void(Node &node)> &callback) {
     }
 }
 
-void GLTFModel::LoadTextures(tinygltf::Model &model) {
-    //// Load Images ////
+void GLTFModel::ForEachNode(const std::function<void(const Node &node)> &callback) const {
+    for (auto &node : m_linear_nodes) {
+        if (node)
+            callback(*node);
+    }
+}
 
-    m_textures[0].srgb_texture_id = 0;
-    m_textures[0].unorm_texture_id = 0;
-    m_textures[0].sampler_id = 0;
+const GLTFModel::Node &GLTFModel::GetNode(uint32_t index) const {
+    Assert(index < m_linear_nodes.size() && m_linear_nodes[index], "Invalid GLTF node!");
+    return *m_linear_nodes[index];
+}
+
+void GLTFModel::LoadMaterials(tinygltf::Model &model) {
+    m_textures.resize(model.textures.size() + 1);
+    
+    for (const tinygltf::Material &material : model.materials) {
+        int albedo_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
+        int normal_texture_index = material.normalTexture.index;
+
+        if (albedo_texture_index >= 0)
+            m_textures[static_cast<uint32_t>(albedo_texture_index) + 1].needs_srgb = true;
+
+        if (normal_texture_index >= 0)
+            m_textures[static_cast<uint32_t>(normal_texture_index) + 1].needs_unorm = true;
+    }
+
+    //// Load Textures ////
 
     struct ImageTextures {
         bool srgb_cached = false;
-        TextureId srgb_image = 0;
+        TextureHandle srgb_image = TextureHandle::Invalid();
 
         bool unorm_cached = false;
-        TextureId unorm_image = 0;
+        TextureHandle unorm_image = TextureHandle::Invalid();
     };
-    std::vector<ImageTextures> texture_image_cache;
-    texture_image_cache.resize(model.images.size());
-    
+
     struct TextureSampler {
         bool cached = false;
-        SamplerId sampler = 0;
+        SamplerHandle sampler = SamplerHandle::Invalid();
     };
-    std::vector<TextureSampler> sampler_cache;
-    sampler_cache.resize(model.samplers.size());
+
+    std::vector<ImageTextures> image_cache(model.images.size());
+    std::vector<TextureSampler> sampler_cache(model.samplers.size());
+
+    const auto get_sampler_filter = [](int filter) -> SamplerFilter {
+        switch (filter) {
+            case TINYGLTF_TEXTURE_FILTER_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+                return SamplerFilter::Nearest;
+
+            case TINYGLTF_TEXTURE_FILTER_LINEAR:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+            default:
+                return SamplerFilter::Linear;
+        }
+    };
+
+    const auto get_mipmap_filter = [](int filter) -> SamplerFilter {
+        switch (filter) {
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+                return SamplerFilter::Nearest;
+
+            case TINYGLTF_TEXTURE_FILTER_NEAREST:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR:
+            case TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+            case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+            default:
+                return SamplerFilter::Linear;
+        }
+    };
+
+    const auto get_wrap_mode = [](int wrap_mode) -> TextureWrapMode {
+        switch (wrap_mode) {
+            case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+                return TextureWrapMode::MirroredRepeat;
+
+            case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+                return TextureWrapMode::ClampToEdge;
+
+            case TINYGLTF_TEXTURE_WRAP_REPEAT:
+            default:
+                return TextureWrapMode::Repeat;
+        }
+    };
 
     for (uint32_t i = 0; i < model.textures.size(); ++i) {
         uint32_t texture_index = i + 1;
@@ -436,47 +424,34 @@ void GLTFModel::LoadTextures(tinygltf::Model &model) {
             continue;
 
         if (texture.sampler == -1) {
-            m_textures[texture_index].sampler_id = 0;
+            m_textures[texture_index].sampler = SamplerHandle::Invalid();
         } else if (sampler_cache[texture.sampler].cached) {
-            m_textures[texture_index].sampler_id = sampler_cache[texture.sampler].sampler;
+            m_textures[texture_index].sampler = sampler_cache[texture.sampler].sampler;
         } else {
-            // Create new vulkan sampler
             const tinygltf::Sampler &sampler = model.samplers[texture.sampler];
 
-            int mag_filter = sampler.magFilter == -1
-                ? TINYGLTF_TEXTURE_FILTER_LINEAR
-                : sampler.magFilter;
+            int mag_filter = sampler.magFilter == -1 ? TINYGLTF_TEXTURE_FILTER_LINEAR : sampler.magFilter;
+            int min_filter = sampler.minFilter == -1 ? TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR : sampler.minFilter;
 
-            int min_filter = sampler.minFilter == -1
-                ? TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR
-                : sampler.minFilter;
-
-            VkSamplerCreateInfo create_info {
-                .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                .magFilter = GetVulkanFilter(mag_filter),
-                .minFilter = GetVulkanFilter(min_filter),
-                .mipmapMode = GetVulkanMipmapMode(min_filter),
-                .addressModeU = GetVulkanWrapMode(sampler.wrapS),
-                .addressModeV = GetVulkanWrapMode(sampler.wrapT),
-                .maxLod = UseMipMaps(min_filter) ? VK_LOD_CLAMP_NONE : 0.0f,
+            TextureSamplerData sampler_data {
+                .min_filter = get_sampler_filter(min_filter),
+                .mag_filter = get_sampler_filter(mag_filter),
+                .mipmap_filter = get_mipmap_filter(min_filter),
+                .wrap_u = get_wrap_mode(sampler.wrapS),
+                .wrap_v = get_wrap_mode(sampler.wrapT),
+                .use_mipmaps = UseMipMaps(min_filter),
             };
 
-            VkSampler vulkan_sampler;
-            VK_CHECK(vkCreateSampler(m_device.Device(), &create_info, nullptr, &vulkan_sampler));
-            m_device.SetDebugName(vulkan_sampler, sampler.name);
+            SamplerHandle sampler_handle = m_asset_manager.CreateSampler(sampler_data);
 
-            SamplerId id = m_resource_manager.AddSampler(vulkan_sampler);
-            sampler_cache[texture.sampler].sampler = id;
+            sampler_cache[texture.sampler].sampler = sampler_handle;
             sampler_cache[texture.sampler].cached = true;
 
-            m_textures[texture_index].sampler_id = id;
+            m_textures[texture_index].sampler = sampler_handle;
         }
 
-        if (texture.source == -1) {
-            m_textures[texture_index].srgb_texture_id = 0;
-            m_textures[texture_index].unorm_texture_id = 0;
+        if (texture.source == -1)
             continue;
-        }
 
         tinygltf::Image &image = model.images[texture.source];
 
@@ -484,80 +459,83 @@ void GLTFModel::LoadTextures(tinygltf::Model &model) {
         Assert(image.bits == 8, "Only 8-bit images are supported!");
         Assert(image.pixel_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, "Only unsigned byte images are supported!");
 
-        const auto create_image = [&](VkFormat format, const std::string &debug_tag) -> TextureId {
-            auto vulkan_image = VulkanImage::ImageBuilder(m_device)
-                .Image2D(image.width, image.height)
-                .Format(format)
-                .MipMaps()
-                .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-                .Build();
-            vulkan_image->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            vulkan_image->Upload(image.image.data(), image.image.size());
+        const auto create_image = [&](TextureFormat format, const std::string &debug_tag) -> TextureHandle {
+            std::string debug_name = image.name.empty() ? std::format("GLTF Image [{}]", texture.source) : image.name;
 
-            m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
-                cmd.GenerateMipMaps(*vulkan_image, VK_FILTER_LINEAR);
-                cmd.ImageMemoryBarrier(*vulkan_image)
-                    .DestAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
-                    .DestStage(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT)
-                    .TransitionLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                    .Execute();
+            std::vector<std::byte> image_data(image.image.size());
+            std::ranges::transform(image.image, image_data.begin(), [](unsigned char byte) {
+                return static_cast<std::byte>(byte);
             });
 
-            std::string debug_name = image.name == ""
-                ? std::format("GLTF Image [{}]", texture.source)
-                : image.name;
+            TextureData texture_data {
+                .extent = glm::uvec2(image.width, image.height),
+                .format = format,
+                .pixels = std::move(image_data),
+                .generate_mipmaps = true,
+            };
 
-            vulkan_image->SetDebugName(std::format("{} ({})", debug_name, debug_tag));
-            return m_resource_manager.AddTexture(vulkan_image);
+            TextureHandle texture_handle = m_asset_manager.CreateTexture(texture_data);
+            auto gpu_texture = m_asset_manager.GetTexture(texture_handle);
+            gpu_texture.second.get().SetDebugName(std::format("{} ({})", debug_name, debug_tag));
+
+            return texture_handle;
         };
 
-        auto &cached_image = texture_image_cache[texture.source];
+        ImageTextures &cached_image = image_cache[texture.source];
 
         if (needs_srgb && !cached_image.srgb_cached) {
-            cached_image.srgb_image = create_image(m_device.GetNonLinearColorFormat(), "sRGB");
+            cached_image.srgb_image = create_image(TextureFormat::RGBA8Srgb, "sRGB");
             cached_image.srgb_cached = true;
         }
 
         if (needs_unorm && !cached_image.unorm_cached) {
-            cached_image.unorm_image = create_image(m_device.GetLinearColorFormat(), "UNORM");
+            cached_image.unorm_image = create_image(TextureFormat::RGBA8, "UNORM");
             cached_image.unorm_cached = true;
         }
 
-        m_textures[texture_index].srgb_texture_id = cached_image.srgb_image;
-        m_textures[texture_index].unorm_texture_id = cached_image.unorm_image;
+        m_textures[texture_index].srgb_texture = cached_image.srgb_image;
+        m_textures[texture_index].unorm_texture = cached_image.unorm_image;
     }
-}
 
-void GLTFModel::LoadMaterials(tinygltf::Model &model) {
+    //// Create Materials ////
+
     m_materials.reserve(model.materials.size() + 1);
 
+    MaterialHandle default_material = m_asset_manager.CreateMaterial(MetallicRoughnessMaterial {});
+
     m_materials.push_back(Material {
-        .color_factors = glm::vec4(1.0f),
-        .albedo_texture_index = 0,
-        .normal_texture_index = 0,
+        .handle = default_material,
+        .has_normal_texture = false,
+        .normal_texcoord = 0,
     });
-    for (auto &material : model.materials) {
-        auto base_color = material.pbrMetallicRoughness.baseColorFactor;
 
-        uint32_t albedo_texture_index = material.pbrMetallicRoughness.baseColorTexture.index + 1;
-        uint32_t normal_texture_index = material.normalTexture.index + 1;
+    for (const tinygltf::Material &material : model.materials) {
+        const tinygltf::PbrMetallicRoughness &pbr = material.pbrMetallicRoughness;
 
-        m_textures[albedo_texture_index].needs_srgb = true;
-        m_textures[normal_texture_index].needs_unorm = true;
+        int gltf_albedo_texture_index = pbr.baseColorTexture.index;
+        int gltf_normal_texture_index = material.normalTexture.index;
 
-        uint32_t albedo_texcoord = material.pbrMetallicRoughness.baseColorTexture.texCoord;
-        uint32_t normal_texcoord = material.normalTexture.texCoord;
+        uint32_t albedo_texture_index = gltf_albedo_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_albedo_texture_index) + 1;
+        uint32_t normal_texture_index = gltf_normal_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_normal_texture_index) + 1;
 
-        m_materials.push_back(Material {
-            .color_factors = glm::make_vec4(base_color.data()),
-            .albedo_texture_index = static_cast<uint32_t>(albedo_texture_index),
-            .albedo_texcoord = albedo_texcoord,
-            .normal_texture_index = static_cast<uint32_t>(normal_texture_index),
-            .normal_texcoord = normal_texcoord,
-            .normal_texture_scale = static_cast<float>(material.normalTexture.scale),
+        MaterialHandle material_handle = m_asset_manager.CreateMaterial(MetallicRoughnessMaterial {
+            .albedo = glm::make_vec4(pbr.baseColorFactor.data()),
+            .albedo_texture = m_textures[albedo_texture_index].srgb_texture,
+            .albedo_sampler = m_textures[albedo_texture_index].sampler,
+            .albedo_texcoord = static_cast<uint32_t>(pbr.baseColorTexture.texCoord),
+            .normal_texture = m_textures[normal_texture_index].unorm_texture,
+            .normal_sampler = m_textures[normal_texture_index].sampler,
+            .normal_texcoord = static_cast<uint32_t>(material.normalTexture.texCoord),
+            .normal_scale = static_cast<float>(material.normalTexture.scale),
+            .metallic = static_cast<float>(pbr.metallicFactor),
+            .roughness = static_cast<float>(pbr.roughnessFactor),
         });
 
-        std::cout << "TEXTURE SCALE: " << material.normalTexture.scale << "\n";
+        m_materials.push_back(Material {
+            .handle = material_handle,
+            .has_normal_texture = gltf_normal_texture_index >= 0,
+            .normal_texcoord = static_cast<uint32_t>(material.normalTexture.texCoord),
+        });
     }
 }
 
@@ -581,8 +559,15 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
     if (node.matrix.size() == 16)
         matrix = glm::make_mat4(node.matrix.data());
 
-    std::shared_ptr<Node> current_node = std::make_shared<Node>(translation, rotation, scale, matrix);
+    std::shared_ptr<Node> current_node = std::make_shared<Node>();
+    current_node->index = node_index;
+    current_node->name = node.name;
+    current_node->translation = translation;
+    current_node->rotation = rotation;
+    current_node->scale = scale;
+    current_node->matrix = matrix;
     current_node->parent = parent;
+
 
     m_linear_nodes[node_index] = current_node;
 
@@ -604,7 +589,8 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
             bool generate_indices = primitive.indices == -1;
 
             const auto material_index = static_cast<uint32_t>(primitive.material + 1);
-            bool has_normal_texture = (material_index > 0) && (m_materials[material_index].normal_texture_index > 0);
+            const Material &material = m_materials[material_index];
+            bool has_normal_texture = material.has_normal_texture;
         
             //// Indices ////
             if (!generate_indices) {
@@ -668,7 +654,6 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
                     }
                 });
             }
-            
 
             //// Tangents ////
             bool has_tangents = primitive.attributes.contains("TANGENT");
@@ -792,7 +777,7 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
                 //// Generate tangents using MikkTSpace algorithm ////
                 std::cout << "Could not find supplied vertex tangents! Generating default tangents.\n";
 
-                uint32_t normal_uvs = m_materials[material_index].normal_texcoord;
+                uint32_t normal_uvs = material.normal_texcoord;
                 GenerateTangents(primitive_vertices, primitive_indices, normal_uvs);
             }
 
@@ -811,7 +796,7 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
             constructed_mesh.primitives.push_back(Primitive {
                 .start_index = initial_index,
                 .index_count = index_count,
-                .material_index = material_index,
+                .material_index = m_asset_manager.GetMaterial(material.handle).material_index,
             });
         }
 

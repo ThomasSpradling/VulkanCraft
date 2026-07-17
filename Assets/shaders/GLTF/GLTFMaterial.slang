@@ -3,15 +3,19 @@ import types;
 struct GLTFMaterial {
     float4 color_factors;
 
+    float metallic;
+    float roughness;
+
     TextureId albedo_texture;
     SamplerId albedo_sampler;
     uint32_t albedo_texcoord;
-    
-    // Normal texture
+
     TextureId normal_texture;
     SamplerId normal_sampler;
     uint32_t normal_texcoord;
     float normal_texture_scale;
+
+    uint3 padding;
 
     bool HasAlbedoTexture() {
         return albedo_texture > 0;
@@ -25,7 +29,7 @@ struct GLTFMaterial {
 float3 CalculateShadingNormal(float3 geometry_normal, float4 geometry_tangent, float3 tangent_space_normal) {
     // Form tangent space basis
     float3 normal = normalize(geometry_normal);
-    float3 tangent = geometry_normal.xyz;
+    float3 tangent = geometry_tangent.xyz;
     tangent = normalize(tangent - normal * dot(normal, tangent));
     float3 bitangent = geometry_tangent.w * cross(normal, tangent);
 

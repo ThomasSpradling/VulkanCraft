@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GPUResourceManager.h"
+#include "Core/Handle.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include <filesystem>
@@ -14,7 +14,7 @@
 #include <tuple>
 #include <variant>
 #include <vector>
-
+#include "AssetManager/AssetManager.h"
 
 class GLTFModel {
 public:
@@ -29,71 +29,45 @@ public:
     };
 
     struct Node {
+        uint32_t index = 0;
+        std::string name;
+    
         Node *parent = nullptr;
         std::vector<std::shared_ptr<Node>> children {};
         std::optional<Mesh> mesh = std::nullopt;
 
-        // Local transforms
-        const glm::dvec3 initial_translation;
-        const glm::dquat initial_rotation;
-        const glm::dvec3 initial_scale;
-        const glm::dmat4 initial_matrix;
+        glm::vec3 translation {};
+        glm::quat rotation { 1.0, 0.0, 0.0, 0.0 };
+        glm::vec3 scale { 1.0 };
+        glm::mat4 matrix { 1.0 };
 
-        glm::dvec3 translation {};
-        glm::dquat rotation { 1.0, 0.0, 0.0, 0.0 };
-        glm::dvec3 scale { 1.0 };
-        glm::dmat4 matrix { 1.0 };
+        std::tuple<glm::vec3, glm::quat, glm::vec3> CalculateTRS() const;
+    };
 
-        // Cache
-        bool local_dirty = true;
-        glm::dmat4 cached_local_transform { 1.0 };
-        bool global_dirty = true;
-        glm::dmat4 cached_global_transform { 1.0 };
+    struct Material {
+        MaterialHandle handle;
 
-        Node(glm::dvec3 initial_translation, glm::dquat initial_rotation, glm::dvec3 initial_scale, glm::dmat4 initial_matrix);
-        void MarkDirty();
-        glm::dmat4 ComputeLocalTransform();
-        glm::dmat4 ComputeGlobalTransform();
-        void Update();
+        // For MikkTSpace
+        bool has_normal_texture = false;
+        uint32_t normal_texcoord = 0;
     };
 public:
-    GLTFModel(const VulkanDevice &device, GPUResourceManager &resource_manager, const std::filesystem::path &file_path);
+    GLTFModel(const VulkanDevice &device, AssetManager &asset_manager, const std::filesystem::path &file_path);
     ~GLTFModel();
 
     void GetCameras();
     
-    void PlayAnimation(uint32_t index, float time, bool loop = false);
-    void ResetPositions();
+    // void PlayAnimation(uint32_t index, float time, bool loop = false);
+    // void ResetPositions();
 
     void ForEachNode(const std::function<void(Node &)> &callback);
+    void ForEachNode(const std::function<void(const Node &)> &callback) const;
     const VulkanBuffer &VertexBuffer() const { return *m_vertex_buffer; }
     const VulkanBuffer &IndexBuffer() const { return *m_index_buffer; }
-    const VulkanBuffer &MaterialBuffer() const { return *m_material_buffer; }
+
+    uint32_t NodeCount() const { return static_cast<uint32_t>(m_linear_nodes.size()); }
+    const Node &GetNode(uint32_t index) const;
 private:
-    struct GPUMaterial {
-        glm::vec4 color_factors;
-
-        TextureId albedo_texture;
-        SamplerId albedo_sampler;
-        uint32_t albedo_texcoord;
-        
-        TextureId normal_texture;
-        SamplerId normal_sampler;
-        uint32_t normal_texcoord;
-        float normal_texture_scale;
-    };
-
-    struct Material {
-        glm::vec4 color_factors {};
-
-        uint32_t albedo_texture_index = 0;
-        uint32_t albedo_texcoord = 0;
-        
-        uint32_t normal_texture_index = 0;
-        uint32_t normal_texcoord = 0;
-        float normal_texture_scale = 1.0f;
-    };
-
     struct MeshVertex {
         glm::vec3 position {};
         glm::vec3 normal {};
@@ -106,10 +80,10 @@ private:
     };
 
     struct Texture {
-        TextureId srgb_texture_id = 0;
-        TextureId unorm_texture_id = 0;
+        TextureHandle srgb_texture = TextureHandle::Invalid();
+        TextureHandle unorm_texture = TextureHandle::Invalid();
 
-        SamplerId sampler_id = 0;
+        SamplerHandle sampler = SamplerHandle::Invalid();
 
         // Whether this texture needs an sRGB and/or UNORM gpu representation for this GLTF file
         bool needs_srgb = false;
@@ -157,7 +131,7 @@ private:
     using ComponentType = std::variant<int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, float>;
 private:
     const VulkanDevice &m_device;
-    GPUResourceManager &m_resource_manager;
+    AssetManager &m_asset_manager;
 
     struct VertexData {
         std::vector<MeshVertex> vertices;
@@ -169,19 +143,13 @@ private:
     // Flattened array of all nodes
     std::vector<std::shared_ptr<Node>> m_linear_nodes {};
 
-    // Index zero is reserved for default texture
     std::vector<Texture> m_textures {};
-
-    // Index zero is reserved as the default material
     std::vector<Material> m_materials {};
-
     std::vector<Animation> m_animations {};
 
     std::unique_ptr<VulkanBuffer> m_vertex_buffer;
     std::unique_ptr<VulkanBuffer> m_index_buffer;
-    std::unique_ptr<VulkanBuffer> m_material_buffer;
 private:
-    void LoadTextures(tinygltf::Model &model);
     void LoadMaterials(tinygltf::Model &model);
     void LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &model, VertexData &data);
     void LoadAnimations(tinygltf::Model &model);

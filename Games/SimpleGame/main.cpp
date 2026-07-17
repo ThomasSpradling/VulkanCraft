@@ -3,6 +3,7 @@
 // #include "Platform/Window/Window.h"
 
 #include <Engine/Client.h>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 
@@ -15,7 +16,6 @@ int main(int argc, char *argv[]) {
             .window_title = "Simple Game",
             .update_rate = 120,
         });
-        
         client_application.Run();
 
         return 0;

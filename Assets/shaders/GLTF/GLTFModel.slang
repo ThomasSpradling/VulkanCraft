@@ -98,23 +98,17 @@ float4 main_frag(VertexOutput frag) : SV_Target {
         shading_normal = material.normal_texture == 0 ? frag.normal : CalculateShadingNormal(frag.normal, frag.tangent, texture_normal);
     }
 
-    // float3 color = frag.color.rgb;
-    // float3 texture_color = SampleTexture2D(material.albedo_texture, material.albedo_sampler, frag.uv0).rgb;
-
     float4 color = frag.color * material.color_factors;
     if (material.HasAlbedoTexture()) {
         float2 albedo_uv = material.albedo_texcoord == 1 ? frag.uv1 : frag.uv0;
         float4 texture_color = SampleTexture2D(material.albedo_texture, material.albedo_sampler, albedo_uv);
         color *= texture_color;
     }
-    // float3 color = 0.5f * texture_color + 0.5f * frag.color.rgb;
-    // float3 color = texture_color;
 
     float power = scene->sun_direction.w;
-    float3 normal = normalize(frag.normal);
     float3 light_dir = normalize(-scene->sun_direction.xyz);
 
     float3 ambient = color.rgb * scene->ambient;
-    float3 diffuse = color.rgb * max(dot(light_dir, normal), 0) * scene->sun_direction.w;
+    float3 diffuse = color.rgb * max(dot(light_dir, shading_normal), 0) * scene->sun_direction.w;
     return float4(ambient + diffuse, frag.color.a);
 }

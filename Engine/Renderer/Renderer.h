@@ -1,11 +1,8 @@
 #pragma once
 
-#include "Camera.h"
+// #include "Camera.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
-#include "GLTFModel.h"
-#include "GPUResourceManager.h"
-#include "Platform/Graphics/DescriptorAllocator.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanSwapChain.h"
@@ -15,25 +12,73 @@
 #include <memory>
 #include <optional>
 
-struct MeshVertex {
-    glm::vec3 position;
-    float uv_x;
-    glm::vec3 normal;
-    float uv_y;
-    glm::vec4 color;
+#include "Core/Handle.h"
+#include "Renderer/BindlessDescriptorTable.h"
+#include "World/World.h"
+
+enum class AntiAliasing : uint8_t {
+    Disabled,
+    MSAAx2,
+    MSAAx4,
+    MSAAx8,
 };
+
+struct RendererSettings {
+    AntiAliasing anti_aliasing = AntiAliasing::Disabled;
+    bool vsync = false;
+};
+
+struct RendererCapabilities {
+    bool hardware_ray_tracing = false;
+    bool mesh_shaders = false;
+
+    std::uint32_t maximum_msaa_samples = 1;
+};
+
+struct EnvironmentSettings {
+    glm::vec4 ambient_color = glm::vec4(1.0f);
+    float ambient_intensity = 0.2f;
+
+    TextureHandle environment_map = TextureHandle::Invalid();
+    float environment_rotation = 0.0f;
+};
+
+struct SceneRenderOptions {
+    bool render_debug_geometry = true;
+};
+
+// struct MeshVertex {
+//     glm::vec3 position;
+//     float uv_x;
+//     glm::vec3 normal;
+//     float uv_y;
+//     glm::vec4 color;
+// };
 
 class Renderer : public NonCopyable, public NonMovable {
 public:
     Renderer(const Window &window);
     ~Renderer();
 
-    Camera &GetCamera() { return m_camera; }
+    void Configure(const RendererSettings &settings);
+    RendererSettings Settings() const;
+    
+    RendererCapabilities Capabilities() const;
+
+    void SetClearColor(const glm::vec4 &color);
+    glm::vec4 ClearColor() const;
+
+    void SetEnvironment(const EnvironmentSettings &settings);
+    EnvironmentSettings Environment() const;
 
     void EnableVSync();
     void DisableVSync();
 
-    void DrawFrame();
+    void RenderScene(World &world, Entity camera, const SceneRenderOptions &options = {});
+    void AttachAssetManager(AssetManager &manager) { m_asset_manager = &manager; }
+    const VulkanDevice &Device() const { return *m_device; }
+
+    BindlessDescriptorTable &BindlessTable() { return *m_bindless_table; }
 private:
     struct FrameContext {
         std::unique_ptr<VulkanCommandPool> command_pool;
@@ -71,17 +116,20 @@ private:
         VkBool32 is_wireframe = false;
     };
 
-    struct alignas(16) MaterialData {
-        TextureId color_texture;
-        SamplerId color_sampler;
-        glm::vec2 pad_;
+    // struct alignas(16) MaterialData {
+    //     TextureId color_texture;
+    //     SamplerId color_sampler;
+    //     glm::vec2 pad_;
 
-        glm::vec4 base_color;
-    };
+    //     glm::vec4 base_color;
+    // };
 private:
     static constexpr uint32_t MaxFramesInFlight = 3;
     const Window &m_window;
+
+    AssetManager *m_asset_manager = nullptr;
     
+    // Settings
     bool m_enable_vsync = false;
 
     // GPU Context
@@ -90,7 +138,6 @@ private:
     std::unique_ptr<ShaderCompiler> m_shader_compiler = nullptr;
 
     std::vector<SwapChainContext> m_swapchain_data;
-    std::unique_ptr<GPUResourceManager> m_resource_manager;
     
     // Frame Data
     uint32_t m_frame_index = 0;
@@ -103,15 +150,12 @@ private:
 
     std::optional<CompiledShader> m_triangle_shader;
 
-    std::vector<GLTFModel> m_models;
-    std::unique_ptr<GLTFModel> m_model;
-
     PushConstantData m_push_constant;
     SpecializationConstantData m_specialization_constant;
 
-    Camera m_camera {};
+    std::unique_ptr<BindlessDescriptorTable> m_bindless_table;
 private:
-    void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
+    // void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
 
     void CreateObjects();
     void DestroyObjects();
@@ -124,6 +168,6 @@ private:
 
     void RecreateSwapChain();
 
-    void UpdateSceneData();
-    void RecordCommands(const FrameContext &frame);
+    void UpdateSceneData(Entity camera);
+    void RecordCommands(const FrameContext &frame, World &world, Entity camera, const SceneRenderOptions &options);
 };

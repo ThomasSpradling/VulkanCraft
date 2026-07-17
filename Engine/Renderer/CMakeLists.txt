@@ -1,10 +1,8 @@
 add_library(engine_renderer STATIC
+    BindlessDescriptorTable.cpp
     DebugRenderer.cpp
-    GLTFModel.cpp
-    GPUResourceManager.cpp
     Renderer.cpp
     Renderer2D.cpp
-    Camera.cpp
 )
 
 target_link_libraries(engine_renderer PUBLIC
@@ -13,8 +11,8 @@ target_link_libraries(engine_renderer PUBLIC
     engine_definitions
     platform_graphics
     platform_window
+    engine_asset_manager
+    engine_world
     imgui
-    tinygltf
     slang::slang
-    mikktspace
 )

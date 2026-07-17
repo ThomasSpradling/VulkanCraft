@@ -1,11 +1,15 @@
 #pragma once
 
-#include "Platform/Window/InputHandler.h"
-#include "Renderer/Renderer.h"
-#include "Network/NetworkHost.h"
+class InputHandler;
+class Renderer;
+class NetworkHost;
+class World;
+class AssetManager;
 
 struct ClientContext {
     InputHandler &input_handler;
     Renderer &renderer;
     NetworkHost &client_host;
+    World &world;
+    AssetManager &assets;
 };

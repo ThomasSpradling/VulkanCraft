@@ -104,10 +104,10 @@ float4 main_frag(VertexOutput frag) : SV_Target {
         shading_normal = material.normal_texture == 0 ? frag.normal : CalculateShadingNormal(frag.normal, frag.tangent, texture_normal);
     }
 
-    float4 surface_color = frag.color * material.color_factors;
-    if (material.HasAlbedoTexture()) {
-        float2 albedo_uv = material.albedo_texcoord == 1 ? frag.uv1 : frag.uv0;
-        float4 texture_color = SampleTexture2D(material.albedo_texture, material.albedo_sampler, albedo_uv);
+    float4 surface_color = frag.color * material.base_color_factor;
+    if (material.HasBaseColorTexture()) {
+        float2 albedo_uv = material.base_color_texcoord == 1 ? frag.uv1 : frag.uv0;
+        float4 texture_color = SampleTexture2D(material.base_color_texture, material.base_color_texture, albedo_uv);
         surface_color *= texture_color;
     }
 
@@ -121,11 +121,6 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     color += diffuse;
 
     uint point_light_count = g_push_constant.scene_data.light_data.point_light_count;
-    // if (point_light_count == 0) {
-    //     return float4(float3(1.0f, 0.0f, 0.0f), frag.color.a);
-    // } else {
-    //     return float4(float3(0.0f, 1.0f, 0.0f), frag.color.a);
-    // }
 
     for (uint i = 0; i < point_light_count; ++i) {
         float4 light_color = point_lights[i].color;

@@ -12,21 +12,37 @@ using AccelerationStructureId = uint32_t;
 //// Materials ////
 
 struct alignas(16) GPUMetallicRoughnessMaterial {
-    glm::vec4 base_color = glm::vec4(1.0f);
+    glm::vec4 base_color_factor = glm::vec4(1.0f);
 
-    float metallic = 0.0f;
-    float roughness = 1.0f;
+    TextureId base_color_texture = 0;
+    SamplerId base_color_sampler = 0;
+    uint32_t base_color_texcoord = 0;
+    float metallic_factor = 1.0f;
 
-    TextureId albedo_texture = 0;
-    SamplerId albedo_sampler = 0;
-    uint32_t albedo_texcoord = 0;
-    
+    float roughness_factor = 1.0f;
+    TextureId metallic_roughness_texture = 0;
+    SamplerId metallic_roughness_sampler = 0;
+    uint32_t metallic_roughness_texcoord = 0;
+
     TextureId normal_texture = 0;
     SamplerId normal_sampler = 0;
     uint32_t normal_texcoord = 0;
-    float normal_texture_scale = 0;
+    float normal_texture_scale = 1.0f;
 
-    uint32_t padding[3] {};
+    TextureId occlusion_texture = 0;
+    SamplerId occlusion_sampler = 0;
+    uint32_t occlusion_texcoord = 0;
+    float occlusion_texture_strength = 1.0f;
+
+    TextureId emissive_texture = 0;
+    SamplerId emissive_sampler = 0;
+    uint32_t emissive_texcoord = 0;
+    float emissive_factor_x = 0.0f;
+
+    float emissive_factor_y = 0.0f;
+    float emissive_factor_z = 0.0f;
+    float alpha_cutoff = 0.5f;
+    uint32_t double_sided = 0;
 };
 
 struct GPUBasicMaterial {

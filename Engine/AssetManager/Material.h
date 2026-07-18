@@ -5,20 +5,39 @@
 #include "Core/Handle.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 
+enum class AlphaMode : uint8_t {
+    Opaque = 0,
+    Mask,
+    Blend,
+};
+
 struct MetallicRoughnessMaterial {
-    glm::vec4 albedo = glm::vec4(1.0f);
+    struct TextureInfo {
+        TextureHandle texture = TextureHandle::Invalid();
+        SamplerHandle sampler = SamplerHandle::Invalid();
+        uint32_t texcoord = 0;
+    };
 
-    TextureHandle albedo_texture = TextureHandle::Invalid();
-    SamplerHandle albedo_sampler = SamplerHandle::Invalid();
-    uint32_t albedo_texcoord = 0;
+    glm::vec4 base_color_factor = glm::vec4(1.0f);
+    TextureInfo base_color_texture {};
 
-    TextureHandle normal_texture = TextureHandle::Invalid();
-    SamplerHandle normal_sampler = SamplerHandle::Invalid();
-    uint32_t normal_texcoord = 0;
-    float normal_scale = 1.0f;
+    float metallic_factor = 1.0f;
+    float roughness_factor = 1.0f;
+    
+    TextureInfo metallic_roughness_texture {};
 
-    float metallic = 0.0f;
-    float roughness = 0.0f;
+    TextureInfo normal_texture {}; // tangent space
+    float normal_texture_scale = 1.0f;
+
+    TextureInfo occlusion_texture {};
+    float occlusion_texture_strength = 1.0f;
+
+    TextureInfo emissive_texture {};
+    glm::vec3 emissive_factor;
+
+    AlphaMode alpha_mode;
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
 };
 
 struct BasicMaterial {

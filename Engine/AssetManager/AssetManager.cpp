@@ -56,16 +56,38 @@ const Mesh &AssetManager::GetMesh(MeshHandle mesh) {
 
 MaterialHandle AssetManager::CreateMaterial(const MetallicRoughnessMaterial &material) {
     GPUMetallicRoughnessMaterial gpu_material {
-        .base_color = material.albedo,
-        .metallic = material.metallic,
-        .roughness = material.roughness,
-        .albedo_texture = GetTextureId(material.albedo_texture),
-        .albedo_sampler = GetSamplerId(material.albedo_sampler),
-        .albedo_texcoord = material.albedo_texcoord,
-        .normal_texture = GetTextureId(material.normal_texture),
-        .normal_sampler = GetSamplerId(material.normal_sampler),
-        .normal_texcoord = material.normal_texcoord,
-        .normal_texture_scale = material.normal_scale,
+        .base_color_factor = material.base_color_factor,
+
+        .base_color_texture = GetTextureId(material.base_color_texture.texture),
+        .base_color_sampler = GetSamplerId(material.base_color_texture.sampler),
+        .base_color_texcoord = material.base_color_texture.texcoord,
+
+        .metallic_factor = material.metallic_factor,
+        .roughness_factor = material.roughness_factor,
+
+        .metallic_roughness_texture = GetTextureId(material.metallic_roughness_texture.texture),
+        .metallic_roughness_sampler = GetSamplerId(material.metallic_roughness_texture.sampler),
+        .metallic_roughness_texcoord = material.metallic_roughness_texture.texcoord,
+
+        .normal_texture = GetTextureId(material.normal_texture.texture),
+        .normal_sampler = GetSamplerId(material.normal_texture.sampler),
+        .normal_texcoord = material.normal_texture.texcoord,
+        .normal_texture_scale = material.normal_texture_scale,
+
+        .occlusion_texture = GetTextureId(material.occlusion_texture.texture),
+        .occlusion_sampler = GetSamplerId(material.occlusion_texture.sampler),
+        .occlusion_texcoord = material.occlusion_texture.texcoord,
+        .occlusion_texture_strength = material.occlusion_texture_strength,
+
+        .emissive_texture = GetTextureId(material.emissive_texture.texture),
+        .emissive_sampler = GetSamplerId(material.emissive_texture.sampler),
+        .emissive_texcoord = material.emissive_texture.texcoord,
+        .emissive_factor_x = material.emissive_factor.x,
+        .emissive_factor_y = material.emissive_factor.y,
+        .emissive_factor_z = material.emissive_factor.z,
+
+        .alpha_cutoff = material.alpha_cutoff,
+        .double_sided = material.double_sided ? 1u : 0u,
     };
 
     if (m_pbr_material_buffer_index + 1 < MaxPbrMaterials) {

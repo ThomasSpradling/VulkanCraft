@@ -1,28 +1,64 @@
 import types;
 
 struct GLTFMaterial {
-    float4 color_factors;
+    float4 base_color_factor;
 
-    float metallic;
-    float roughness;
+    TextureId base_color_texture;
+    SamplerId base_color_sampler;
+    uint base_color_texcoord;
+    float metallic_factor;
 
-    TextureId albedo_texture;
-    SamplerId albedo_sampler;
-    uint32_t albedo_texcoord;
+    float roughness_factor;
+    TextureId metallic_roughness_texture;
+    SamplerId metallic_roughness_sampler;
+    uint metallic_roughness_texcoord;
 
     TextureId normal_texture;
     SamplerId normal_sampler;
-    uint32_t normal_texcoord;
+    uint normal_texcoord;
     float normal_texture_scale;
 
-    uint3 pad_;
+    TextureId occlusion_texture;
+    SamplerId occlusion_sampler;
+    uint occlusion_texcoord;
+    float occlusion_texture_strength;
 
-    bool HasAlbedoTexture() {
-        return albedo_texture > 0;
+    TextureId emissive_texture;
+    SamplerId emissive_sampler;
+    uint emissive_texcoord;
+    float emissive_factor_x;
+
+    float emissive_factor_y;
+    float emissive_factor_z;
+    float alpha_cutoff;
+    uint double_sided;
+
+    bool HasBaseColorTexture() {
+        return base_color_texture != 0;
+    }
+
+    bool HasMetallicRoughnessTexture() {
+        return metallic_roughness_texture != 0;
     }
 
     bool HasNormalTexture() {
-        return normal_texture > 0;
+        return normal_texture != 0;
+    }
+
+    bool HasOcclusionTexture() {
+        return occlusion_texture != 0;
+    }
+
+    bool HasEmissiveTexture() {
+        return emissive_texture != 0;
+    }
+
+    float3 GetEmissiveFactor() {
+        return float3(emissive_factor_x, emissive_factor_y, emissive_factor_z);
+    }
+
+    bool IsDoubleSided() {
+        return double_sided != 0;
     }
 };
 

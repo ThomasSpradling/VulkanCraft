@@ -24,7 +24,7 @@ private:
     double m_time = 0.0f;
 
     Entity m_camera;
-    // Entity m_sun;
+    Entity m_sun;
     Player m_player;
 
     glm::vec3 light_direction = glm::vec3(-1.0f, -1.0f, 0.0f);

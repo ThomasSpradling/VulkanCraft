@@ -342,13 +342,25 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
     
     for (const tinygltf::Material &material : model.materials) {
         int albedo_texture_index = material.pbrMetallicRoughness.baseColorTexture.index;
+        int metallic_roughness_texture_index = material.pbrMetallicRoughness.metallicRoughnessTexture.index;
         int normal_texture_index = material.normalTexture.index;
+        int occlusion_texture_index = material.occlusionTexture.index;
+        int emissive_texture_index = material.emissiveTexture.index;
 
         if (albedo_texture_index >= 0)
             m_textures[static_cast<uint32_t>(albedo_texture_index) + 1].needs_srgb = true;
 
+        if (metallic_roughness_texture_index >= 0)
+            m_textures[static_cast<uint32_t>(metallic_roughness_texture_index) + 1].needs_unorm = true;
+        
         if (normal_texture_index >= 0)
             m_textures[static_cast<uint32_t>(normal_texture_index) + 1].needs_unorm = true;
+        
+        if (occlusion_texture_index >= 0)
+            m_textures[static_cast<uint32_t>(occlusion_texture_index) + 1].needs_unorm = true;
+        
+        if (emissive_texture_index >= 0)
+            m_textures[static_cast<uint32_t>(emissive_texture_index) + 1].needs_unorm = true;
     }
 
     //// Load Textures ////
@@ -499,6 +511,17 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
 
     //// Create Materials ////
 
+    const auto get_alpha_mode = [](const std::string &mode) -> AlphaMode {
+        if (mode == "OPAQUE") {
+            return AlphaMode::Opaque;
+        } else if (mode == "MASK") {
+            return AlphaMode::Mask;
+        } else if (mode == "BLEND") {
+            return AlphaMode::Blend;
+        }
+        return AlphaMode::Opaque;
+    };
+
     m_materials.reserve(model.materials.size() + 1);
 
     MaterialHandle default_material = m_asset_manager.CreateMaterial(MetallicRoughnessMaterial {});
@@ -513,22 +536,51 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
         const tinygltf::PbrMetallicRoughness &pbr = material.pbrMetallicRoughness;
 
         int gltf_albedo_texture_index = pbr.baseColorTexture.index;
+        int gltf_metallic_roughness_texture_index = pbr.metallicRoughnessTexture.index;
         int gltf_normal_texture_index = material.normalTexture.index;
+        int gltf_occlusion_texture_index = material.occlusionTexture.index;
+        int gltf_emissive_texture_index = material.emissiveTexture.index;
 
         uint32_t albedo_texture_index = gltf_albedo_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_albedo_texture_index) + 1;
+        uint32_t metallic_roughness_texture_index = gltf_metallic_roughness_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_metallic_roughness_texture_index) + 1;
         uint32_t normal_texture_index = gltf_normal_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_normal_texture_index) + 1;
+        uint32_t occlusion_texture_index = gltf_occlusion_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_occlusion_texture_index) + 1;
+        uint32_t emissive_texture_index = gltf_emissive_texture_index < 0 ? 0 : static_cast<uint32_t>(gltf_emissive_texture_index) + 1;
 
         MaterialHandle material_handle = m_asset_manager.CreateMaterial(MetallicRoughnessMaterial {
-            .albedo = glm::make_vec4(pbr.baseColorFactor.data()),
-            .albedo_texture = m_textures[albedo_texture_index].srgb_texture,
-            .albedo_sampler = m_textures[albedo_texture_index].sampler,
-            .albedo_texcoord = static_cast<uint32_t>(pbr.baseColorTexture.texCoord),
-            .normal_texture = m_textures[normal_texture_index].unorm_texture,
-            .normal_sampler = m_textures[normal_texture_index].sampler,
-            .normal_texcoord = static_cast<uint32_t>(material.normalTexture.texCoord),
-            .normal_scale = static_cast<float>(material.normalTexture.scale),
-            .metallic = static_cast<float>(pbr.metallicFactor),
-            .roughness = static_cast<float>(pbr.roughnessFactor),
+            .base_color_factor = glm::make_vec4(pbr.baseColorFactor.data()),
+            .base_color_texture = {
+                .texture = m_textures[albedo_texture_index].srgb_texture,
+                .sampler = m_textures[albedo_texture_index].sampler,
+                .texcoord = static_cast<uint32_t>(pbr.baseColorTexture.texCoord),
+            },
+            .metallic_factor = static_cast<float>(pbr.metallicFactor),
+            .roughness_factor = static_cast<float>(pbr.roughnessFactor),
+            .metallic_roughness_texture = {
+                .texture = m_textures[metallic_roughness_texture_index].unorm_texture,
+                .sampler = m_textures[metallic_roughness_texture_index].sampler,
+                .texcoord = static_cast<uint32_t>(pbr.metallicRoughnessTexture.texCoord),
+            },
+            .normal_texture = {
+                .texture = m_textures[normal_texture_index].unorm_texture,
+                .sampler = m_textures[normal_texture_index].sampler,
+                .texcoord = static_cast<uint32_t>(material.normalTexture.texCoord),
+            },
+            .normal_texture_scale = static_cast<float>(material.normalTexture.scale),
+            .occlusion_texture = {
+                .texture = m_textures[occlusion_texture_index].unorm_texture,
+                .sampler = m_textures[occlusion_texture_index].sampler,
+                .texcoord = static_cast<uint32_t>(material.occlusionTexture.texCoord),
+            },
+            .occlusion_texture_strength = static_cast<float>(material.occlusionTexture.strength),
+            .emissive_texture = {
+                .texture = m_textures[emissive_texture_index].unorm_texture,
+                .sampler = m_textures[emissive_texture_index].sampler,
+                .texcoord = static_cast<uint32_t>(material.emissiveTexture.texCoord),
+            },
+            .emissive_factor = glm::make_vec3(material.emissiveFactor.data()),
+            .alpha_mode = get_alpha_mode(material.alphaMode),
+            .double_sided = material.doubleSided,
         });
 
         m_materials.push_back(Material {

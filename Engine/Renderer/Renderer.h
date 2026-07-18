@@ -106,12 +106,13 @@ private:
         glm::mat4 projection;
         glm::mat4 view;
         glm::vec4 sun_direction; // w = power
+        glm::vec4 eye_position;
         float ambient;
         VkDeviceAddress light_data;
     };  
 
     struct PushConstantData {
-        glm::mat4 model;        
+        glm::mat4 model;
         VkDeviceAddress vertex_buffer;
         VkDeviceAddress scene_data_buffer;
         VkDeviceAddress material_buffer;

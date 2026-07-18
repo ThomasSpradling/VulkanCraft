@@ -73,13 +73,15 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
 
     const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
     glm::mat4 projection_matrix = CalculateProjectionMatrix(world.Get<CameraComponent>(camera), aspect);
-    glm::mat4 view_matrix = glm::inverse(world.GlobalMatrix(camera));
+    glm::mat4 camera_model = world.GlobalMatrix(camera);
+    glm::mat4 view_matrix = glm::inverse(camera_model);
 
     auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
     data->projection = projection_matrix;
+    data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
     data->view = view_matrix;
     data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-    data->ambient = 0.1f;
+    data->ambient = .1f;
     data->light_data = frame.light_data->DeviceAddress();
     m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
 

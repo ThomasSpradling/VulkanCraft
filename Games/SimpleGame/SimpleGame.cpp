@@ -48,7 +48,7 @@ void SimpleGame::Initialize(ClientContext &context) {
     m_sun = context.world.CreateEntity("Sun");
     context.world.Add<DirectionalLight>(m_sun, DirectionalLight {
         .color = glm::vec4(1.0f),
-        .intensity = 1.0f,
+        .intensity = 10.0f,
     });
 
     // Entity red_light = context.world.BuildGLTF(helmet);

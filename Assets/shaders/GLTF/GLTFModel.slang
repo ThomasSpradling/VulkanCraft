@@ -93,12 +93,12 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     DirectionalLight directional_light = scene.light_data.directional_light;
     ImmutablePtr<PointLight> point_lights = scene.light_data.point_lights;
     
-    float3 shading_normal = frag.normal;
+    float3 shading_normal = normalize(frag.normal);
     if (material.HasNormalTexture()) {
         float2 normal_uv = material.normal_texcoord == 1 ? frag.uv1 : frag.uv0;
         
         float3 texture_normal = SampleTexture2D(material.normal_texture, material.normal_sampler, normal_uv).xyz * 2.0 - 1.0;
-        texture_normal *= material.normal_texture_scale;
+        texture_normal.xy *= material.normal_texture_scale;
         texture_normal = normalize(texture_normal);
     
         shading_normal = material.normal_texture == 0 ? frag.normal : CalculateShadingNormal(frag.normal, frag.tangent, texture_normal);
@@ -106,10 +106,21 @@ float4 main_frag(VertexOutput frag) : SV_Target {
 
     float4 surface_color = frag.color * material.base_color_factor;
     if (material.HasBaseColorTexture()) {
-        float2 albedo_uv = material.base_color_texcoord == 1 ? frag.uv1 : frag.uv0;
-        float4 texture_color = SampleTexture2D(material.base_color_texture, material.base_color_texture, albedo_uv);
+        float2 uv = material.base_color_texcoord == 1 ? frag.uv1 : frag.uv0;
+        float4 texture_color = SampleTexture2D(material.base_color_texture, material.base_color_sampler, uv);
         surface_color *= texture_color;
     }
+
+    float roughness = material.roughness_factor;
+    float metallic = material.metallic_factor;
+    if (material.HasMetallicRoughnessTexture()) {
+        float2 uv = material.metallic_roughness_texcoord == 1 ? frag.uv1 : frag.uv0;
+        float4 texture_value = SampleTexture2D(material.metallic_roughness_texture, material.metallic_roughness_sampler, uv);
+        roughness *= texture_value.g;
+        metallic *= texture_value.b;
+    }
+
+    float3 view_dir = normalize(scene->eye_position.xyz - frag.world_position.xyz);
 
     float3 color = float3(0.0f, 0.0f, 0.0f);
     float3 ambient = surface_color.rgb * scene->ambient;
@@ -117,16 +128,24 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     
     float sun_power = directional_light.color.w;
     float3 light_dir = normalize(-directional_light.direction.xyz);
-    float3 diffuse = surface_color.rgb * directional_light.color.rgb * max(dot(light_dir, shading_normal), 0) * sun_power;
-    color += diffuse;
+    float3 brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
+    color += brdf * directional_light.color.rgb * sun_power * max(dot(shading_normal, light_dir), 0.0f);
+    // float3 diffuse = surface_color.rgb * directional_light.color.rgb * max(dot(light_dir, shading_normal), 0) * sun_power;
+    // color += diffuse;
 
     uint point_light_count = g_push_constant.scene_data.light_data.point_light_count;
 
     for (uint i = 0; i < point_light_count; ++i) {
         float4 light_color = point_lights[i].color;
-        float3 direction = normalize(point_lights[i].position - frag.world_position.xyz);
-        color += surface_color.rgb * light_color.rgb * max(dot(direction, shading_normal), 0) * light_color.w;
+        float3 to_light = point_lights[i].position - frag.world_position.xyz;
+        float distance_squared = max(dot(to_light, to_light), 1e-4f);
+        float3 direction = to_light * rsqrt(distance_squared);
+        // color += ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
+        brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, direction, view_dir);
+        color += brdf * light_color.rgb * light_color.w * max(dot(shading_normal, direction), 0.0f);
+        // color += surface_color.rgb * light_color.rgb * max(dot(direction, shading_normal), 0) * light_color.w;
     }
 
     return float4(color, frag.color.a);
 }
+

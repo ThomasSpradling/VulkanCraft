@@ -3,8 +3,10 @@
 #include <cmath>
 #include <cstdint>
 #include <glm/detail/qualifier.hpp>
+#include <glm/ext/quaternion_float.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <limits>
 #include <type_traits>
 

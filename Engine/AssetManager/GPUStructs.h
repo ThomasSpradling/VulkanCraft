@@ -2,11 +2,14 @@
 
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <volk.h>
 
 using TextureId = uint32_t;
 using SamplerId = uint32_t;
 using StorageImageId = uint32_t;
 using AccelerationStructureId = uint32_t;
+
+//// Materials ////
 
 struct alignas(16) GPUMetallicRoughnessMaterial {
     glm::vec4 base_color = glm::vec4(1.0f);
@@ -31,4 +34,25 @@ struct GPUBasicMaterial {
 
     TextureId color_texture = 0;
     SamplerId color_sampler = 0;
+};
+
+//// Lights ////
+struct alignas(16) GPUDirectionalLight {
+    glm::vec4 color; // w = intensity
+    glm::vec3 direction;
+    float pad_;
+};
+
+struct alignas(16) GPUPointLight {
+    glm::vec4 color; // w = intensity
+    glm::vec3 position;
+    float range;
+};
+
+struct GPULightData {
+    GPUDirectionalLight directional_light;
+
+    uint32_t point_light_count;
+    float pad_;
+    VkDeviceAddress point_lights;
 };

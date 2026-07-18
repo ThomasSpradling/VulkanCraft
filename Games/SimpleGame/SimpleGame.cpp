@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -16,7 +17,7 @@
 void SimpleGame::Initialize(ClientContext &context) {
     // context.renderer.EnableVSync();
 
-    GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/SimpleSparseAccessor.gltf");
+    GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
     context.world.BuildGLTF(helmet);
 
     CreatePlayer(context);
@@ -29,6 +30,23 @@ void SimpleGame::Initialize(ClientContext &context) {
     });
 
     context.world.AttachParent(m_camera, m_player.player, TransformMethod::Local);
+
+    // m_sun = context.world.CreateEntity("Sun");
+    // context.world.Add<DirectionalLight>(m_sun, DirectionalLight {
+    //     .color = glm::vec4(1.0f),
+    //     .intensity = 1.0f,
+    // });
+
+    Entity red_light = context.world.BuildGLTF(helmet);
+    auto &red_transform = context.world.Get<Transform>(red_light);
+    red_transform.scale *= 0.1f;
+    red_transform.translation = glm::vec3(1.0f, 0.0f, 0.0f);
+
+    context.world.Add<PointLight>(red_light, PointLight {
+        .color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+        .intensity = 1.0f,
+        .range = 10.0f,
+    });
 }
 
 void SimpleGame::CreatePlayer(ClientContext &context) {
@@ -42,7 +60,7 @@ void SimpleGame::CreatePlayer(ClientContext &context) {
     auto &transform = context.world.Get<Transform>(m_player.player);
 
     transform.translation = m_player.position;
-    transform.rotation = glm::quatLookAtRH(m_player.view_direction, glm::vec3(0.0f, 1.0f, 0.0f));
+    transform.rotation = glm::quatLookAt(m_player.view_direction, glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
 void SimpleGame::ShutDown(ClientContext &context) {
@@ -54,6 +72,8 @@ void SimpleGame::ShutDown(ClientContext &context) {
 }
 
 void SimpleGame::Update(double delta_time, ClientContext &context) {
+    m_time += delta_time;
+
     HandleInputs(delta_time, context.input_handler);
 
     auto &player_transform = context.world.Get<Transform>(m_player.player);
@@ -63,6 +83,12 @@ void SimpleGame::Update(double delta_time, ClientContext &context) {
         glm::normalize(m_player.view_direction),
         glm::vec3(0.0f, 1.0f, 0.0f)
     );
+
+    // float radius = 10.0f;
+    // glm::vec3 direction = glm::vec3(radius * glm::cos(m_time / 1000.0f), -1.0f, radius * glm::sin(m_time / 1000.0f));
+    // direction = glm::normalize(direction);
+    // auto &sun_transform = context.world.Get<Transform>(m_sun);
+    // sun_transform.rotation = glm::quatLookAt(direction, glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
 void SimpleGame::Render(double delta_time, ClientContext &context) {

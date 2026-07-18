@@ -41,7 +41,7 @@ ShaderCompiler::ShaderCompiler(const std::filesystem::path &shader_search_path, 
                 .kind = slang::CompilerOptionValueKind::Int,
                 .intValue0 = 1,
             }
-        }
+        },
     };
 
     slang::SessionDesc session_desc = {

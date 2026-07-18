@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <type_traits>
 #include <vector>
+#include "Core/ResourcePool.h"
 
 [[maybe_unused]] constexpr uint32_t MaxPbrMaterials = 1'024;
 [[maybe_unused]] constexpr uint32_t MaxBasicMaterials = 1'024;
@@ -58,56 +59,6 @@ public:
     const MaterialRecord &GetMaterial(MaterialHandle material);
     std::pair<SamplerId, VkSampler> GetSampler(SamplerHandle material);
     std::pair<TextureId, std::reference_wrapper<VulkanImage>> GetTexture(TextureHandle texture);
-private:
-    template<typename T, typename Tag>
-    struct ResourcePool {
-        std::vector<T> data;
-        std::vector<uint32_t> generations;
-        std::vector<uint32_t> available_indices;
-
-        ResourcePool() {
-            data.resize(1'000);
-            generations.resize(1'000, 0);
-        }
-
-        Handle<Tag> Add(T &record) {
-            uint32_t index;
-
-            if (!available_indices.empty()) {
-                index = available_indices.back();
-                available_indices.pop_back();
-
-                data[index] = std::move(record);
-            } else {
-                index = static_cast<uint32_t>(data.size());
-                data.push_back(std::move(record));
-                generations.push_back(0);
-            }
-
-            Handle<Tag> handle;
-            handle.m_index = index;
-            handle.m_generation = generations[index];
-            return handle;
-        }
-        
-        T &Get(Handle<Tag> handle) {
-            Assert(handle.m_index < data.size(), "Cannot get mesh thats out of range!");
-            Assert(handle.m_index < generations.size(), "Cannot get mesh thats out of range!");
-            Assert(handle.m_generation == generations[handle.m_index], "Mismatching generations for meshes!");
-
-            return data[handle.m_index];
-        }
-
-        void Remove(Handle<Tag> handle) {
-            if (handle.m_index >= data.size() || handle.m_index >= generations.size() || handle.m_generation != generations[handle.m_index]) {
-                return;
-            }
-
-            data[handle.m_index] = T{};
-            ++generations[handle.m_index];
-            available_indices.push_back(handle.m_index);
-        }
-    };
 private:
     const VulkanDevice &m_device;
 

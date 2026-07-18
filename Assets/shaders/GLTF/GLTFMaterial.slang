@@ -15,7 +15,7 @@ struct GLTFMaterial {
     uint32_t normal_texcoord;
     float normal_texture_scale;
 
-    uint3 padding;
+    uint3 pad_;
 
     bool HasAlbedoTexture() {
         return albedo_texture > 0;

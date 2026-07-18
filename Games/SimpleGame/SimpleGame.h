@@ -21,8 +21,13 @@ private:
         Entity player = Entity::Invalid();
     };
 private:
+    double m_time = 0.0f;
+
     Entity m_camera;
+    // Entity m_sun;
     Player m_player;
+
+    glm::vec3 light_direction = glm::vec3(-1.0f, -1.0f, 0.0f);
 
     const float MouseSensitivity = 0.2f;
     const float PlayerSpeed = 5.0f; // units / sec

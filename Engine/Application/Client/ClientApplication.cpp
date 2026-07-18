@@ -11,6 +11,7 @@
 #include "AssetManager/AssetManager.h"
 #include "World/World.h"
 #include "AssetManager/GLTFModel.h"
+#include "Core/Clock.h"
 
 ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig &config)
     : m_game(game)
@@ -55,6 +56,8 @@ void ClientApplication::Run() {
     using clock = std::chrono::steady_clock;
     using namespace std::chrono_literals;
 
+    Clock::s_Time = 0.0f;
+
     auto previous_time = clock::now();
 
     double update_accum = 0.0;
@@ -89,6 +92,7 @@ void ClientApplication::Run() {
         previous_time = current_time;
         
         update_accum += delta_time.count();
+        Clock::s_Time += delta_time.count();
 
         double frame_time = std::clamp(delta_time.count(), 0.0, MAX_FRAME_WAIT_TIME_MS);
         render_accum += frame_time;

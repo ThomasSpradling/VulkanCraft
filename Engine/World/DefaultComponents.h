@@ -1,8 +1,10 @@
 #pragma once
 
+#include <deque>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <variant>
+#include <vector>
 
 #include "Core/Handle.h"
 
@@ -25,15 +27,20 @@ struct PerspectiveProjection {
     float fov = glm::radians(60.0f);
     float near_plane = 0.05f;
     float far_plane = 1000.0f;
+
+    glm::mat4 CalculateProjectionMatrix(float aspect) const;
 };
 
 struct OrthographicProjection {
     float vertical_size = 10.0f;
     float near_plane = 0.05f;
     float far_plane = 1000.0f;
+
+    glm::mat4 CalculateProjectionMatrix(float aspect) const;
 };
 
 using CameraComponent = std::variant<PerspectiveProjection, OrthographicProjection>;
+glm::mat4 CalculateProjectionMatrix(const CameraComponent &camera_component, float aspect);
 
 //// Mesh ////
 

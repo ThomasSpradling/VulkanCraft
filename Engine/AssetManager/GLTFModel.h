@@ -68,17 +68,6 @@ public:
     uint32_t NodeCount() const { return static_cast<uint32_t>(m_linear_nodes.size()); }
     const Node &GetNode(uint32_t index) const;
 private:
-    struct MeshVertex {
-        glm::vec3 position {};
-        glm::vec3 normal {};
-        glm::vec4 tangent {};
-        glm::vec2 uv0 {};
-        glm::vec2 uv1 {};
-        glm::vec4 color {};
-        glm::uvec2 joints0 {}; // 4 shorts packed
-        glm::vec4 weights0 {};
-    };
-
     struct Texture {
         TextureHandle srgb_texture = TextureHandle::Invalid();
         TextureHandle unorm_texture = TextureHandle::Invalid();

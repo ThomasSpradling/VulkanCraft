@@ -92,7 +92,7 @@ public:
         Assert(Has<Component>(entity), "Component not present!");
 
         auto type_id = std::type_index(typeid(Component));
-        auto *component_storage = dynamic_cast<ComponentStorage<Component> *>(m_component_storage[type_id].get());
+        auto *component_storage = static_cast<ComponentStorage<Component> *>(m_component_storage[type_id].get());
         return component_storage->Get(entity);
     }
 
@@ -101,7 +101,7 @@ public:
         Assert(Has<Component>(entity), "Component not present!");
 
         auto type_id = std::type_index(typeid(Component));
-        auto *component_storage = dynamic_cast<ComponentStorage<Component> *>(m_component_storage.at(type_id).get());
+        auto *component_storage = static_cast<ComponentStorage<Component> *>(m_component_storage.at(type_id).get());
         return component_storage->Get(entity);
     }
 

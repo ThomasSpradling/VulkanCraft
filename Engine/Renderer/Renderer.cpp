@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "AssetManager/GPUStructs.h"
 #include "AssetManager/Material.h"
 #include "Common.h"
 #include "Platform/Graphics/CommandBuffer.h"
@@ -19,6 +20,7 @@
 #include <vector>
 #include "AssetManager/AssetManager.h"
 #include "AssetManager/GLTFModel.h"
+#include "Core/ToString.h"
 
 Renderer::Renderer(const Window &window)
     : m_window(window)
@@ -67,35 +69,61 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     SwapChainContext &swapchain_context = m_swapchain_data[*image_index];
     const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
 
-    //// Configure Camera ////
-
-    auto &camera_projection = world.Get<CameraComponent>(camera);
-
-    auto projection_matrix = glm::mat4(1.0f);
-    const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-    
-    if (const auto* persp = std::get_if<PerspectiveProjection>(&camera_projection)) {
-        projection_matrix = glm::perspectiveRH_ZO(persp->fov, aspect, persp->near_plane, persp->far_plane);
-    } else {
-        const auto &ortho = std::get<OrthographicProjection>(camera_projection);
-        
-        float half_height = ortho.vertical_size / 2.0f;
-        float half_width  = half_height * aspect;
-        projection_matrix = glm::orthoRH_ZO(-half_width, half_width, -half_height, half_height, ortho.near_plane, ortho.far_plane);
-    }
-
-    projection_matrix[1][1] *= -1.0f;
-
-    glm::mat4 view_matrix = glm::inverse(world.GlobalMatrix(camera));
-
     //// Update Uniform Buffer ////
+
+    const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    glm::mat4 projection_matrix = CalculateProjectionMatrix(world.Get<CameraComponent>(camera), aspect);
+    glm::mat4 view_matrix = glm::inverse(world.GlobalMatrix(camera));
 
     auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
     data->projection = projection_matrix;
     data->view = view_matrix;
     data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
     data->ambient = 0.1f;
+    data->light_data = frame.light_data->DeviceAddress();
     m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
+
+    bool found = false;
+    DirectionalLight directional_light;
+    glm::vec3 light_direction;
+    world.Each<DirectionalLight>([&](Entity entity, DirectionalLight &light) {
+        if (found)
+            return;
+        directional_light = light;
+        found = true;
+        
+        light_direction = glm::normalize(world.Get<Transform>(entity).rotation * glm::vec3(0.0f, 0.0f, -1.0f));
+    });
+
+    if (!found) {
+        directional_light.color = glm::vec4(1.0f);
+        directional_light.intensity = 1.0f;
+        light_direction = glm::vec3(1.0f, -2.0f, -1.0f);
+    }
+
+    auto *light_data = frame.light_data->Mapped<GPULightData>();
+    light_data->directional_light.color = directional_light.color;
+    light_data->directional_light.color.w = directional_light.intensity;
+    light_data->directional_light.direction = light_direction;
+    light_data->point_lights = frame.point_lights->DeviceAddress();
+
+    auto *point_lights = frame.point_lights->Mapped<GPUPointLight>();
+    uint32_t point_light_count = 0;
+    world.Each<PointLight>([&](Entity entity, PointLight &light) {
+        if (point_light_count >= MaxPointLights) {
+            std::cerr << "Warning: Too many point lights! Not rendering anymore.\n";
+            return;
+        }
+
+        GPUPointLight &gpu_light = point_lights[point_light_count];
+        gpu_light.color = light.color;
+        gpu_light.color.w = light.intensity;
+        gpu_light.range = light.range;
+        gpu_light.position = glm::vec3(world.GlobalMatrix(entity)[3]);;
+
+        point_light_count++;
+    });
+    light_data->point_light_count = point_light_count;
 
     //// Draw ////
 
@@ -241,9 +269,9 @@ void Renderer::CreateObjects() {
             .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
             .Size(sizeof(SceneUniformData))
             .Build();
-
-        m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
     }
+
+    CreateLights();
 
     m_triangle_shader = m_shader_compiler->Compile("GLTF/GLTFModel");
     Assert(m_triangle_shader, "Failed to compile shader!");
@@ -368,4 +396,28 @@ void Renderer::RecreateSwapChain() {
     });
 
     CreateSwapChainObjects();
+}
+
+void Renderer::CreateLights() {
+    for (uint32_t i = 0; i < MaxFramesInFlight; ++i) {
+        FrameContext &frame = m_frame_data[i];
+
+        frame.light_data = VulkanBuffer::BufferBuilder(*m_device)
+            .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+            .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
+            .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+            .Size(sizeof(GPULightData))
+            .Build();
+        frame.light_data->SetDebugName(std::format("Light Data [{}]", i));
+        
+        frame.point_lights = VulkanBuffer::BufferBuilder(*m_device)
+            .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+            .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
+            .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+            .Size(sizeof(GPUPointLight) * MaxPointLights)
+            .Build();
+        frame.point_lights->SetDebugName(std::format("Point Lights [{}]", i));
+    }
 }

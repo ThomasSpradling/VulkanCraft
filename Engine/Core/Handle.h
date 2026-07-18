@@ -3,12 +3,14 @@
 #include <cstdint>
 #include <limits>
 
-class AssetManager;
 template <typename Tag>
 class Handle {
-    friend AssetManager;
 public:
     Handle() = default;
+    Handle(uint32_t index, uint32_t generation)
+        : m_index(index)
+        , m_generation(generation) 
+    {}
 
     static constexpr Handle Invalid() {
         Handle handle;
@@ -23,8 +25,10 @@ public:
     }
 
     explicit constexpr operator bool() const { return IsValid(); }
-
     friend constexpr bool operator==(Handle, Handle) = default;
+
+    uint32_t Index() { return m_index; }
+    uint32_t Generation() { return m_generation; }
 private:
     uint32_t m_index = std::numeric_limits<uint32_t>::max();
     uint32_t m_generation = std::numeric_limits<uint32_t>::max();
@@ -32,18 +36,20 @@ private:
 
 //// Default Handles ////
 
-struct MeshHandleTag;
+struct AnimationHandleTag;
+struct BufferHandleTag;
+struct GLTFHandleTag;
 struct MaterialHandleTag;
+struct MeshHandleTag;
 struct TextureHandleTag;
 struct SamplerHandleTag;
 struct ShaderHandleTag;
-struct GLTFHandleTag;
-struct BufferHandleTag;
 
-using MeshHandle = Handle<MeshHandleTag>;
+using AnimationHandle = Handle<AnimationHandleTag>;
+using BufferHandle = Handle<BufferHandleTag>;
+using GLTFHandle = Handle<GLTFHandleTag>;
 using MaterialHandle = Handle<MaterialHandleTag>;
+using MeshHandle = Handle<MeshHandleTag>;
 using TextureHandle = Handle<TextureHandleTag>;
 using SamplerHandle = Handle<SamplerHandleTag>;
 using ShaderHandle = Handle<ShaderHandleTag>;
-using GLTFHandle = Handle<GLTFHandleTag>;
-using BufferHandle = Handle<BufferHandleTag>;

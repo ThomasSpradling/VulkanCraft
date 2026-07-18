@@ -16,6 +16,8 @@
 #include "Renderer/BindlessDescriptorTable.h"
 #include "World/World.h"
 
+[[maybe_unused]] constexpr uint32_t MaxPointLights = 100;
+
 enum class AntiAliasing : uint8_t {
     Disabled,
     MSAAx2,
@@ -87,6 +89,10 @@ private:
         std::unique_ptr<VulkanFence> graphics_submit_fence;
         std::unique_ptr<VulkanSemaphore> image_available;
         std::unique_ptr<VulkanBuffer> scene_uniform_buffer;
+
+        // Lights
+        std::unique_ptr<VulkanBuffer> light_data;
+        std::unique_ptr<VulkanBuffer> point_lights;
     };
     
     struct SwapChainContext {
@@ -101,28 +107,20 @@ private:
         glm::mat4 view;
         glm::vec4 sun_direction; // w = power
         float ambient;
+        VkDeviceAddress light_data;
     };  
 
     struct PushConstantData {
-        glm::mat4 model;
+        glm::mat4 model;        
         VkDeviceAddress vertex_buffer;
         VkDeviceAddress scene_data_buffer;
         VkDeviceAddress material_buffer;
-
         uint32_t material_id = 0;
     };
 
     struct SpecializationConstantData {
         VkBool32 is_wireframe = false;
     };
-
-    // struct alignas(16) MaterialData {
-    //     TextureId color_texture;
-    //     SamplerId color_sampler;
-    //     glm::vec2 pad_;
-
-    //     glm::vec4 base_color;
-    // };
 private:
     static constexpr uint32_t MaxFramesInFlight = 3;
     const Window &m_window;
@@ -170,4 +168,6 @@ private:
 
     void UpdateSceneData(Entity camera);
     void RecordCommands(const FrameContext &frame, World &world, Entity camera, const SceneRenderOptions &options);
+
+    void CreateLights();
 };

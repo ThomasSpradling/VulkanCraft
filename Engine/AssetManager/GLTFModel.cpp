@@ -360,7 +360,7 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
             m_textures[static_cast<uint32_t>(occlusion_texture_index) + 1].needs_unorm = true;
         
         if (emissive_texture_index >= 0)
-            m_textures[static_cast<uint32_t>(emissive_texture_index) + 1].needs_unorm = true;
+            m_textures[static_cast<uint32_t>(emissive_texture_index) + 1].needs_srgb = true;
     }
 
     //// Load Textures ////
@@ -574,7 +574,7 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
             },
             .occlusion_texture_strength = static_cast<float>(material.occlusionTexture.strength),
             .emissive_texture = {
-                .texture = m_textures[emissive_texture_index].unorm_texture,
+                .texture = m_textures[emissive_texture_index].srgb_texture,
                 .sampler = m_textures[emissive_texture_index].sampler,
                 .texcoord = static_cast<uint32_t>(material.emissiveTexture.texCoord),
             },

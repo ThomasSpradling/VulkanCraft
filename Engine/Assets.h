@@ -3,3 +3,4 @@
 #include "AssetManager/Material.h"
 #include "AssetManager/Mesh.h"
 #include "AssetManager/Texture.h"
+#include "AssetManager/Shape.h"

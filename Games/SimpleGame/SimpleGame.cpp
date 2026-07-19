@@ -2,6 +2,7 @@
 
 #include "Application/Client/ClientContext.h"
 #include "AssetManager/AssetManager.h"
+#include "AssetManager/Material.h"
 #include "Platform/Window/InputHandler.h"
 #include "Renderer/Renderer.h"
 #include "World/DefaultComponents.h"
@@ -17,22 +18,42 @@
 void SimpleGame::Initialize(ClientContext &context) {
     // context.renderer.EnableVSync();
 
-    GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
-    Entity helmet_entity = context.world.BuildGLTF(helmet);
-    auto &helmet_trasnform = context.world.Get<Transform>(helmet_entity);
-    helmet_trasnform.scale *= 0.5f;
-    helmet_trasnform.translation.x += 3.0f;
+    //// Objects ////
 
-    context.world.Add<PointLight>(helmet_entity, PointLight {
-        .color = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
-        .intensity = 1.0f,
-        .range = 10.0f,
+    MaterialHandle gray_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
+        .base_color_factor = glm::vec4(0.0f, 0.5f, 0.3f, 1.0f),
+        .metallic_factor = 0.0f,
+        .roughness_factor = 0.4f,
+    });
+    MeshHandle cone_mesh = context.assets.CreateMesh(Shape::UVShape(
+        64,
+        24,
+        [&](float u, float v) -> glm::vec3 {
+            float theta = u * 2.0f * glm::pi<float>();
+            float phi = -v * 2.0f * glm::pi<float>();
+
+            float major_radius = 1.0f;
+            float minor_radius = 0.5f;
+            float ring_radius = major_radius + minor_radius * std::cos(phi);
+
+            return glm::vec3(
+                ring_radius * std::cos(theta),
+                minor_radius * std::sin(phi),
+                ring_radius * std::sin(theta)
+            );
+        }
+    ));
+
+    Entity cone = context.world.CreateEntity("Cone");
+    context.world.Add<ProceduralMeshComponent>(cone, ProceduralMeshComponent {
+        .mesh = cone_mesh,
+        .material = gray_material,
     });
 
-    GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/WaterBottle.glb");
-    Entity bottle_entity = context.world.BuildGLTF(bottle);
-    auto &bottle_transform = context.world.Get<Transform>(bottle_entity);
-    bottle_transform.scale *= 10.0f;
+    // GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
+    // context.world.BuildGLTF(bottle);
+    // auto &bottle_transform = context.world.Get<Transform>(bottle_entity);
+    // bottle_transform.scale *= 10.0f;
 
     CreatePlayer(context);
 
@@ -45,21 +66,63 @@ void SimpleGame::Initialize(ClientContext &context) {
 
     context.world.AttachParent(m_camera, m_player.player, TransformMethod::Local);
 
-    m_sun = context.world.CreateEntity("Sun");
+    //// Lighting ////
+    m_sun = context.world.CreateEntity("Key Light");
     context.world.Add<DirectionalLight>(m_sun, DirectionalLight {
         .color = glm::vec4(1.0f),
-        .intensity = 10.0f,
+        .intensity = 4.0f,
     });
 
-    // Entity red_light = context.world.BuildGLTF(helmet);
-    // auto &red_transform = context.world.Get<Transform>(red_light);
-    // red_transform.scale *= 0.1f;
-    // red_transform.translation = glm::vec3(1.0f, 0.0f, 0.0f);
+    Entity fill_light = context.world.CreateEntity("Fill Light", Transform {
+        .translation = glm::vec3(-2.0f, 0.5f, 2.0f),
+    });
+    context.world.Add<PointLight>(fill_light, PointLight {
+        .color = glm::vec4(0.65f, 0.75f, 1.0f, 1.0f),
+        .intensity = 12.0f,
+        .range = 8.0f,
+    });
 
-    // context.world.Add<PointLight>(red_light, PointLight {
-    //     .color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),
+    Entity rim_light = context.world.CreateEntity("Rim Light", Transform {
+        .translation = glm::vec3(1.5f, 1.0f, -2.0f),
+    });
+    context.world.Add<PointLight>(rim_light, PointLight {
+        .color = glm::vec4(1.0f, 0.75f, 0.55f, 1.0f),
+        .intensity = 18.0f,
+        .range = 8.0f,
+    });
+
+    // GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
+    // Entity helmet_entity = context.world.BuildGLTF(helmet);
+    // auto &helmet_trasnform = context.world.Get<Transform>(helmet_entity);
+    // helmet_trasnform.scale *= 0.5f;
+    // helmet_trasnform.translation.x += 3.0f;
+
+    // context.world.Add<PointLight>(helmet_entity, PointLight {
+    //     .color = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
     //     .intensity = 1.0f,
-    //     .range = 10.0f,
+    //     .range = 1.0f,
+    // });
+
+    // GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/WaterBottle.glb");
+    // Entity bottle_entity = context.world.BuildGLTF(bottle);
+    // auto &bottle_transform = context.world.Get<Transform>(bottle_entity);
+    // bottle_transform.scale *= 10.0f;
+
+    // CreatePlayer(context);
+
+    // m_camera = context.world.CreateEntity("Main Camera");
+    // context.world.Add<CameraComponent>(m_camera, PerspectiveProjection{
+    //     .fov = glm::radians(45.0f),
+    //     .near_plane = 0.05f,
+    //     .far_plane = 350.0f,
+    // });
+
+    // context.world.AttachParent(m_camera, m_player.player, TransformMethod::Local);
+
+    // m_sun = context.world.CreateEntity("Sun");
+    // context.world.Add<DirectionalLight>(m_sun, DirectionalLight {
+    //     .color = glm::vec4(1.0f),
+    //     .intensity = 10.0f,
     // });
 }
 
@@ -98,7 +161,7 @@ void SimpleGame::Update(double delta_time, ClientContext &context) {
         glm::vec3(0.0f, 1.0f, 0.0f)
     );
 
-    float radius = 10.0f;
+    float radius = 1.0f;
     glm::vec3 direction = glm::vec3(radius * glm::cos(m_time / 1000.0f), -1.0f, radius * glm::sin(m_time / 1000.0f));
     direction = glm::normalize(direction);
     auto &sun_transform = context.world.Get<Transform>(m_sun);

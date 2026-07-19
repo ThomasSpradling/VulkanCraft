@@ -132,7 +132,7 @@ float3 SpecularBRDF(float alpha, float3 shading_normal, float3 light_dir, float3
 }
 
 float3 ComputeBRDF(float3 base_color, float roughness, float metallic, float3 shading_normal, float3 light_dir, float3 view_dir) {
-    if (dot(shading_normal, light_dir) <= 0.0f || dot(shading_normal, view_dir) <= 0.0f) {
+    if (dot(shading_normal, light_dir) <= 0.0f) {
         return 0.0f;
     }
 

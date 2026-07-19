@@ -8,6 +8,7 @@
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Renderer/BindlessDescriptorTable.h"
 #include "Platform/Graphics/VulkanImage.h"
+#include "Shape.h"
 #include "Texture.h"
 #include <filesystem>
 #include <type_traits>
@@ -45,6 +46,7 @@ public:
     
     GLTFHandle LoadGLTF(const std::filesystem::path &path);
     MeshHandle CreateMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices);
+    MeshHandle CreateMesh(const Shape &shape);
     
     MaterialHandle CreateMaterial(const MetallicRoughnessMaterial &material);
     MaterialHandle CreateMaterial(const BasicMaterial &material);

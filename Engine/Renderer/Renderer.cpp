@@ -81,7 +81,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
     data->view = view_matrix;
     data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-    data->ambient = .1f;
+    data->ambient = 0.1f;
     data->light_data = frame.light_data->DeviceAddress();
     m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
 

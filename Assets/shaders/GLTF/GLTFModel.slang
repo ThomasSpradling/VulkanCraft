@@ -46,6 +46,27 @@ struct PushConstantData {
 }
 [[vk::push_constant]] ConstantBuffer<PushConstantData> g_push_constant;
 
+float3 ContributeDirectionalLight(DirectionalLight light, float3 surface_color, float3 shading_normal, float metallic, float roughness, float3 view_dir) {
+    float power = light.color.w;
+    float3 light_dir = normalize(-light.direction.xyz);
+    float3 brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
+    return brdf * light.color.rgb * power * max(dot(shading_normal, light_dir), 0.0f);
+}
+
+float3 ContributePointLight(PointLight light, float3 surface_color, float3 surface_position, float3 shading_normal, float metallic, float roughness, float3 view_dir) {
+    float3 light_dir = light.position - surface_position;
+    float distance = length(light_dir);
+
+    if (distance < 0.0001f)
+        return float3(0.0f);
+
+    light_dir /= distance;
+    
+    float power = light.color.w;
+    float3 brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
+    return brdf * light.Attenuation(distance) * light.color.rgb * power * max(dot(shading_normal, light_dir), 0.0f);
+}
+
 [[SpecializationConstant]] const bool WIREFRAME = false;
 
 [shader("vertex")]
@@ -93,7 +114,7 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     DirectionalLight directional_light = scene.light_data.directional_light;
     ImmutablePtr<PointLight> point_lights = scene.light_data.point_lights;
     
-    float3 shading_normal = normalize(frag.normal);
+    float3 shading_normal = frag.normal;
     if (material.HasNormalTexture()) {
         float2 normal_uv = material.normal_texcoord == 1 ? frag.uv1 : frag.uv0;
         
@@ -101,10 +122,11 @@ float4 main_frag(VertexOutput frag) : SV_Target {
         texture_normal.xy *= material.normal_texture_scale;
         texture_normal = normalize(texture_normal);
     
-        shading_normal = material.normal_texture == 0 ? frag.normal : CalculateShadingNormal(frag.normal, frag.tangent, texture_normal);
+        shading_normal = CalculateShadingNormal(frag.normal, frag.tangent, texture_normal);
     }
+    shading_normal = normalize(shading_normal);
 
-    float4 surface_color = frag.color * material.base_color_factor;
+    float4 surface_color = material.base_color_factor;
     if (material.HasBaseColorTexture()) {
         float2 uv = material.base_color_texcoord == 1 ? frag.uv1 : frag.uv0;
         float4 texture_color = SampleTexture2D(material.base_color_texture, material.base_color_sampler, uv);
@@ -120,32 +142,33 @@ float4 main_frag(VertexOutput frag) : SV_Target {
         metallic *= texture_value.b;
     }
 
+    float3 emissive = material.GetEmissiveFactor();
+    if (material.HasEmissiveTexture()) {
+        float2 uv = material.emissive_texcoord == 1 ? frag.uv1 : frag.uv0;
+        float4 texture_value = SampleTexture2D(material.emissive_texture, material.emissive_sampler, uv);
+        emissive *= texture_value.rgb;
+    }
+
+    float occlusion = 1.0f;
+    if (material.HasOcclusionTexture()) {
+        float2 uv = material.occlusion_texcoord == 1 ? frag.uv1 : frag.uv0;
+        float4 texture_value = SampleTexture2D(material.occlusion_texture, material.occlusion_sampler, uv);
+        occlusion *= texture_value.r;
+    }
+    occlusion = 1.0f + material.occlusion_texture_strength * (occlusion - 1.0f);
+
     float3 view_dir = normalize(scene->eye_position.xyz - frag.world_position.xyz);
 
-    float3 color = float3(0.0f, 0.0f, 0.0f);
+    float3 color = emissive;
     float3 ambient = surface_color.rgb * scene->ambient;
     color += ambient;
     
-    float sun_power = directional_light.color.w;
-    float3 light_dir = normalize(-directional_light.direction.xyz);
-    float3 brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
-    color += brdf * directional_light.color.rgb * sun_power * max(dot(shading_normal, light_dir), 0.0f);
-    // float3 diffuse = surface_color.rgb * directional_light.color.rgb * max(dot(light_dir, shading_normal), 0) * sun_power;
-    // color += diffuse;
-
+    color += ContributeDirectionalLight(directional_light, surface_color.rgb, shading_normal, metallic, roughness, view_dir);
+    
     uint point_light_count = g_push_constant.scene_data.light_data.point_light_count;
-
     for (uint i = 0; i < point_light_count; ++i) {
-        float4 light_color = point_lights[i].color;
-        float3 to_light = point_lights[i].position - frag.world_position.xyz;
-        float distance_squared = max(dot(to_light, to_light), 1e-4f);
-        float3 direction = to_light * rsqrt(distance_squared);
-        // color += ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, light_dir, view_dir);
-        brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, direction, view_dir);
-        color += brdf * light_color.rgb * light_color.w * max(dot(shading_normal, direction), 0.0f);
-        // color += surface_color.rgb * light_color.rgb * max(dot(direction, shading_normal), 0) * light_color.w;
+        color += ContributePointLight(point_lights[i], surface_color.rgb, frag.world_position.xyz, shading_normal, metallic, roughness, view_dir);
     }
-
-    return float4(color, frag.color.a);
+    
+    return float4(color.rgb, surface_color.a);
 }
-

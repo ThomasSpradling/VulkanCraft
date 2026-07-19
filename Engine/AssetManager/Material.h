@@ -33,7 +33,7 @@ struct MetallicRoughnessMaterial {
     float occlusion_texture_strength = 1.0f;
 
     TextureInfo emissive_texture {};
-    glm::vec3 emissive_factor;
+    glm::vec3 emissive_factor = glm::vec3(0.0f);
 
     AlphaMode alpha_mode;
     float alpha_cutoff = 0.5f;

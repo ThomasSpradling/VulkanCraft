@@ -9,7 +9,7 @@ struct MeshVertex {
     glm::vec4 tangent {};
     glm::vec2 uv0 {};
     glm::vec2 uv1 {};
-    glm::vec4 color {};
+    glm::vec4 color = glm::vec4(1.0f);
     glm::uvec2 joints0 {}; // 4 shorts packed
     glm::vec4 weights0 {};
 };

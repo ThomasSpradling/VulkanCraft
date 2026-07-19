@@ -15,7 +15,7 @@ Mesh::Mesh(const VulkanDevice &device, const std::vector<MeshVertex> &vertices, 
         .Size(indices.size() * sizeof(uint32_t))
         .Build();
 
-    m_index_buffer->Upload(vertices);
+    m_index_buffer->Upload(indices);
     m_index_count = static_cast<uint32_t>(indices.size());
 }
 

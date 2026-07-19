@@ -46,6 +46,21 @@ MeshHandle AssetManager::CreateMesh(const std::vector<MeshVertex> &vertices, con
     return m_meshes.Add(current_mesh);
 }
 
+MeshHandle AssetManager::CreateMesh(const Shape &shape) {
+    std::vector<MeshVertex> vertices(shape.VertexCount());
+    std::ranges::transform(shape.Vertices(), vertices.begin(), [](const ShapeVertex &vert) {
+        return MeshVertex {
+            .position = vert.position,
+            .normal = vert.normal,
+            .tangent = vert.tangent,
+            .uv0 = vert.uv,
+            .uv1 = vert.uv,
+        };
+    });
+
+    return CreateMesh(vertices, shape.Indices());
+}
+
 const GLTFModel &AssetManager::GetGLTF(GLTFHandle gltf) {
     return *m_gltf_models.Get(gltf);
 }

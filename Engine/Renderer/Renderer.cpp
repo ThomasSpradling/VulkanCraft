@@ -1,7 +1,9 @@
 #include "Renderer.h"
+#include "AssetManager/Buffer.h"
 #include "AssetManager/GPUStructs.h"
 #include "AssetManager/Material.h"
 #include "Common.h"
+#include "GarbageCollector.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/VulkanBuffer.h"
@@ -22,13 +24,12 @@
 #include "AssetManager/GLTFModel.h"
 #include "Core/ToString.h"
 
-Renderer::Renderer(const Window &window)
-    : m_window(window)
+Renderer::Renderer(const VulkanDevice &device, const Window &window)
+    : m_device(device)
+    , m_window(window)
 {
     std::cout << "Initializing Renderer\n";
-    m_device = std::make_unique<VulkanDevice>(window);
-
-    m_swapchain = std::make_unique<VulkanSwapChain>(*m_device, SwapChainConfig{
+    m_swapchain = std::make_unique<VulkanSwapChain>(m_device, SwapChainConfig{
         .width = window.GetFramebufferSize().x,
         .height = window.GetFramebufferSize().y,
         .enable_vsync = m_enable_vsync,
@@ -36,20 +37,23 @@ Renderer::Renderer(const Window &window)
 
     std::filesystem::path path(ASSET_PATH "/shaders");
     m_shader_compiler = std::make_unique<ShaderCompiler>(path);
-    m_bindless_table = std::make_unique<BindlessDescriptorTable>(*m_device);
-
-    CreateObjects();
+    m_bindless_table = std::make_unique<BindlessDescriptorTable>(m_device);
+    m_garbage_collector = std::make_unique<GarbageCollector>(MaxFramesInFlight);
 }
 
 Renderer::~Renderer() {
     std::cout << "Destroying Renderer\n";
 
+    m_garbage_collector->CollectAll();
+
     DestroyObjects();
 
     m_bindless_table.reset();
-
     m_swapchain.reset();
-    m_device.reset();
+}
+
+void Renderer::Initialize() {
+    CreateObjects();
 }
 
 void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions &options) {
@@ -57,6 +61,8 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     FrameContext &frame = m_frame_data[m_frame_index];
 
     frame.graphics_submit_fence->Wait();
+    m_garbage_collector->Collect(m_frame_index);
+
     auto image_index = m_swapchain->AcquireNextImage(nullptr, frame.image_available->Handle());
     if (!image_index) {
         RecreateSwapChain();
@@ -65,6 +71,8 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     
     frame.graphics_submit_fence->Reset();
     frame.command_pool->Reset();
+
+    m_garbage_collector->SetCurrentFrame(m_frame_index);
     
     SwapChainContext &swapchain_context = m_swapchain_data[*image_index];
     const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
@@ -76,14 +84,20 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     glm::mat4 camera_model = world.GlobalMatrix(camera);
     glm::mat4 view_matrix = glm::inverse(camera_model);
 
-    auto *data = frame.scene_uniform_buffer->Mapped<SceneUniformData>();
-    data->projection = projection_matrix;
-    data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
-    data->view = view_matrix;
-    data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-    data->ambient = 0.1f;
-    data->light_data = frame.light_data->DeviceAddress();
-    m_push_constant.scene_data_buffer = frame.scene_uniform_buffer->DeviceAddress();
+    VulkanBuffer &scene_buffer = m_asset_manager->GetBuffer(frame.scene_uniform_buffer);
+    VulkanBuffer &light_data = m_asset_manager->GetBuffer(frame.light_data);
+    VulkanBuffer &point_lights = m_asset_manager->GetBuffer(frame.point_lights);
+    
+    m_push_constant.scene_data_buffer = scene_buffer.DeviceAddress();
+    {
+        auto *data = scene_buffer.Mapped<SceneUniformData>();
+        data->projection = projection_matrix;
+        data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
+        data->view = view_matrix;
+        data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
+        data->ambient = 0.1f;
+        data->light_data = light_data.DeviceAddress();
+    }
 
     bool found = false;
     DirectionalLight directional_light;
@@ -103,29 +117,31 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         light_direction = glm::vec3(1.0f, -2.0f, -1.0f);
     }
 
-    auto *light_data = frame.light_data->Mapped<GPULightData>();
-    light_data->directional_light.color = directional_light.color;
-    light_data->directional_light.color.w = directional_light.intensity;
-    light_data->directional_light.direction = light_direction;
-    light_data->point_lights = frame.point_lights->DeviceAddress();
+    {
+        auto *data = light_data.Mapped<GPULightData>();
+        data->directional_light.color = directional_light.color;
+        data->directional_light.color.w = directional_light.intensity;
+        data->directional_light.direction = light_direction;
+        data->point_lights = point_lights.DeviceAddress();
 
-    auto *point_lights = frame.point_lights->Mapped<GPUPointLight>();
-    uint32_t point_light_count = 0;
-    world.Each<PointLight>([&](Entity entity, PointLight &light) {
-        if (point_light_count >= MaxPointLights) {
-            std::cerr << "Warning: Too many point lights! Not rendering anymore.\n";
-            return;
-        }
-
-        GPUPointLight &gpu_light = point_lights[point_light_count];
-        gpu_light.color = light.color;
-        gpu_light.color.w = light.intensity;
-        gpu_light.range = light.range;
-        gpu_light.position = glm::vec3(world.GlobalMatrix(entity)[3]);;
-
-        point_light_count++;
-    });
-    light_data->point_light_count = point_light_count;
+        auto *point_light_data = point_lights.Mapped<GPUPointLight>();
+        uint32_t point_light_count = 0;
+        world.Each<PointLight>([&](Entity entity, PointLight &light) {
+            if (point_light_count >= MaxPointLights) {
+                std::cerr << "Warning: Too many point lights! Not rendering anymore.\n";
+                return;
+            }
+    
+            GPUPointLight &gpu_light = point_light_data[point_light_count];
+            gpu_light.color = light.color;
+            gpu_light.color.w = light.intensity;
+            gpu_light.range = light.range;
+            gpu_light.position = glm::vec3(world.GlobalMatrix(entity)[3]);;
+    
+            point_light_count++;
+        });
+        data->point_light_count = point_light_count;
+    }
 
     //// Draw ////
 
@@ -220,7 +236,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
 
     submit_info.command_buffers.push_back(frame.command_buffer.get());
 
-    m_device->QueueSubmit(QueueType::Graphics, submit_info, *frame.graphics_submit_fence);
+    m_device.QueueSubmit(QueueType::Graphics, submit_info, *frame.graphics_submit_fence);
 
     std::vector<VkSemaphore> present_waits { swapchain_context.render_finished->Handle() };
     if (!m_swapchain->Present(present_waits))
@@ -254,23 +270,23 @@ void Renderer::CreateObjects() {
     for (uint32_t i = 0; i < MaxFramesInFlight; ++i) {
         FrameContext &frame = m_frame_data[i];
         
-        frame.command_pool = m_device->CreateCommandPool(QueueType::Graphics, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+        frame.command_pool = m_device.CreateCommandPool(QueueType::Graphics, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
         frame.command_pool->SetDebugName(std::format("Render Command Pool [{}]", i));
         
         frame.command_buffer = frame.command_pool->AllocateCommandBuffer();
         frame.command_buffer->SetDebugName(std::format("Render Command Buffer [{}]", i));
 
-        frame.graphics_submit_fence = m_device->CreateFence();
+        frame.graphics_submit_fence = m_device.CreateFence();
         frame.graphics_submit_fence->SetDebugName(std::format("Graphics Submit Fence [{}]", i));
         
-        frame.image_available = m_device->CreateBinarySemaphore();
+        frame.image_available = m_device.CreateBinarySemaphore();
         frame.image_available->SetDebugName(std::format("Image Available Semaphore [{}]", i));
 
-        frame.scene_uniform_buffer = VulkanBuffer::BufferBuilder(*m_device)
-            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-            .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
-            .Size(sizeof(SceneUniformData))
-            .Build();
+        frame.scene_uniform_buffer = m_asset_manager->CreateBuffer(GPUBufferData {
+            .usage = BufferUsageBits::Storage,
+            .size = sizeof(SceneUniformData),
+            .debug_name = std::format("Scene Buffer [{}]", i),
+        });
     }
 
     CreateLights();
@@ -283,9 +299,6 @@ void Renderer::CreateObjects() {
 }
 
 void Renderer::DestroyObjects() {
-    if (m_device)
-        vkDeviceWaitIdle(m_device->Device());
-
     DestroyTrianglePipeline();
     DestroySwapChainObjects();
 
@@ -299,19 +312,19 @@ void Renderer::CreateSwapChainObjects() {
     for (uint32_t i = 0; i < m_swapchain->GetImageCount(); ++i) {
         SwapChainContext &context = m_swapchain_data[i];
 
-        context.render_finished = m_device->CreateBinarySemaphore();
+        context.render_finished = m_device.CreateBinarySemaphore();
         context.render_finished->SetDebugName(std::format("Render Finished Semaphore [{}]", i));
 
-        context.draw_image = VulkanImage::ImageBuilder(*m_device)
+        context.draw_image = VulkanImage::ImageBuilder(m_device)
             .Image2D(extent.width, extent.height)
-            .Format(m_device->GetLinearColorFormat())
+            .Format(m_device.GetLinearColorFormat())
             .AddUsage(VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
             .Build();
         context.draw_image->SetDebugName(std::format("Draw Image [{}]", i));
 
-        context.depth_buffer = VulkanImage::ImageBuilder(*m_device)
+        context.depth_buffer = VulkanImage::ImageBuilder(m_device)
             .Image2D(extent.width, extent.height)
-            .Format(m_device->GetDepthOnlyFormat())
+            .Format(m_device.GetDepthOnlyFormat())
             .AddUsage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
             .Build();
     }
@@ -343,7 +356,7 @@ void Renderer::CreateTrianglePipeline() {
 
     Assert(m_triangle_shader, "Triangle shader was not compiled!");
 
-    auto builder = VulkanPipeline::GraphicsBuilder(*m_device)
+    auto builder = VulkanPipeline::GraphicsBuilder(m_device)
         .VertexShader(*m_triangle_shader, "main_vert")
         .FragmentShader(*m_triangle_shader, "main_frag")
         
@@ -353,10 +366,10 @@ void Renderer::CreateTrianglePipeline() {
 
         .EnableDepthTest()
         .AddColorAttachment({
-            .format = m_device->GetLinearColorFormat(),
+            .format = m_device.GetLinearColorFormat(),
             .blending_mode = BlendMode::Disabled,
         })
-        .SetDepthAttachmentFormat(m_device->GetDepthOnlyFormat())
+        .SetDepthAttachmentFormat(m_device.GetDepthOnlyFormat())
         .AddPushConstant(range)
         .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
         .SetSpecializationConstants(specialization_info);
@@ -387,7 +400,7 @@ void Renderer::RecreateSwapChain() {
     if (framebuffer_size.x == 0 || framebuffer_size.y == 0)
         return;
 
-    vkDeviceWaitIdle(m_device->Device());
+    vkDeviceWaitIdle(m_device.Device());
 
     DestroySwapChainObjects();
 
@@ -404,22 +417,16 @@ void Renderer::CreateLights() {
     for (uint32_t i = 0; i < MaxFramesInFlight; ++i) {
         FrameContext &frame = m_frame_data[i];
 
-        frame.light_data = VulkanBuffer::BufferBuilder(*m_device)
-            .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
-            .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
-            .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-            .Size(sizeof(GPULightData))
-            .Build();
-        frame.light_data->SetDebugName(std::format("Light Data [{}]", i));
+        frame.light_data = m_asset_manager->CreateBuffer(GPUBufferData {
+            .usage = BufferUsageBits::Storage,
+            .size = sizeof(GPULightData),
+            .debug_name = std::format("Light Data [{}]", i),
+        });
         
-        frame.point_lights = VulkanBuffer::BufferBuilder(*m_device)
-            .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
-            .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
-            .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-            .Size(sizeof(GPUPointLight) * MaxPointLights)
-            .Build();
-        frame.point_lights->SetDebugName(std::format("Point Lights [{}]", i));
+        frame.point_lights = m_asset_manager->CreateBuffer(GPUBufferData {
+            .usage = BufferUsageBits::Storage,
+            .size = sizeof(GPUPointLight) * MaxPointLights,
+            .debug_name = std::format("Point Lights [{}]", i),
+        });
     }
 }

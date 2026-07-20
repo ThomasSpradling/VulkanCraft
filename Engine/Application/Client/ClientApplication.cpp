@@ -5,6 +5,7 @@
 #include <memory>
 #include <thread>
 
+#include "ClientContext.h"
 #include "Network/NetworkHost.h"
 #include "Platform/Sockets/SocketAPI.h"
 #include "Renderer/Renderer.h"
@@ -21,11 +22,13 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
         .title = config.window_title,
     });
 
+    m_device = std::make_unique<VulkanDevice>(*m_window);
+
     m_target_fps = config.target_fps;
     m_update_rate = config.update_rate;
     
-    m_renderer = std::make_unique<Renderer>(*m_window);
-    m_asset_manager = std::make_unique<AssetManager>(m_renderer->Device(), m_renderer->BindlessTable());
+    m_renderer = std::make_unique<Renderer>(*m_device, *m_window);
+    m_asset_manager = std::make_unique<AssetManager>(*m_device, m_renderer->GPUGargbageCollector(), m_renderer->BindlessTable());
     m_renderer->AttachAssetManager(*m_asset_manager);
 
     m_world = std::make_unique<World>(*m_asset_manager);
@@ -47,6 +50,7 @@ ClientApplication::~ClientApplication() {
     m_asset_manager.reset();
     
     m_renderer.reset();
+    m_device.reset();
     m_window.reset();
 
     std::cout << "Destroyed ClientApplication!\n";
@@ -78,7 +82,7 @@ void ClientApplication::Run() {
     };
 
     m_running = true;
-    m_game.Initialize(context);
+    Initialize(context);
     while (m_running) {
         if (m_window->ShouldClose()) {
             m_running = false;
@@ -137,6 +141,11 @@ void ClientApplication::Run() {
         vkDeviceWaitIdle(m_renderer->Device().Device());
     }
     m_game.ShutDown(context);
+}
+
+void ClientApplication::Initialize(ClientContext &context) {
+    m_renderer->Initialize();
+    m_game.Initialize(context);
 }
 
 void ClientApplication::Update(double delta_time, ClientContext &context) {

@@ -66,7 +66,7 @@ public:
     // Immediately submits recorded commands in the specified queue. If `async` is turned on,
     // this function will not wait for submission to be complete.
     void ImmediateSubmit(QueueType type, const std::function<void(const CommandBuffer &)> &record, bool async = false) const;
-    void QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence);
+    void QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence) const;
 public:
     std::unique_ptr<ShaderModule> CreateShaderModule(const std::vector<uint32_t> &spriv_code) const;
 

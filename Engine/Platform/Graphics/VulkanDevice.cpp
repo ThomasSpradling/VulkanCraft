@@ -123,7 +123,7 @@ void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(cons
     }
 }
 
-void VulkanDevice::QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence) {
+void VulkanDevice::QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence) const {
     // Wait Semaphores
     std::vector<VkSemaphoreSubmitInfo> wait_semaphores;
     wait_semaphores.resize(submit_info.wait_semaphores.size());

@@ -1,4 +1,5 @@
 #include "GLTFModel.h"
+#include "Buffer.h"
 #include "Core/Handle.h"
 #include "Core/Math.h"
 #include "Material.h"
@@ -154,9 +155,8 @@ GLTFModel::AnimationOutput GLTFModel::AnimationSampler::Sample(float current_tim
 // ---- GLTF Model ---- //
 // ==================== //
 
-GLTFModel::GLTFModel(const VulkanDevice &device, AssetManager &asset_manager, const std::filesystem::path &file_path)
-    : m_device(device)
-    , m_asset_manager(asset_manager)
+GLTFModel::GLTFModel(AssetManager &asset_manager, const std::filesystem::path &file_path)
+    : m_asset_manager(asset_manager)
 {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -206,25 +206,25 @@ GLTFModel::GLTFModel(const VulkanDevice &device, AssetManager &asset_manager, co
     }
     LoadAnimations(model);
 
-    m_vertex_buffer = VulkanBuffer::BufferBuilder(m_device)
-        .Size(data.vertices.size() * sizeof(MeshVertex))
-        .AddUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-        .Build();
-    m_vertex_buffer->Upload(data.vertices);
+    std::string debug_name = scene.name.empty() ? file_path.filename().string() : scene.name;
+    m_vertex_buffer = m_asset_manager.CreateBuffer(GPUBufferData {
+        .usage = BufferUsageBits::Storage,
+        .size = data.vertices.size() * sizeof(MeshVertex),
+        .data = data.vertices.data(),
+        .debug_name = std::format("GLTF Model ({}) Vertex Buffer", debug_name),
+    });
 
-    m_index_buffer = VulkanBuffer::BufferBuilder(m_device)
-        .Size(data.indices.size() * sizeof(uint32_t))
-        .AddUsage(VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-        .Build();
-    m_index_buffer->Upload(data.indices);
+    m_index_buffer = m_asset_manager.CreateBuffer(GPUBufferData {
+        .usage = BufferUsageBits::Index,
+        .size = data.indices.size() * sizeof(uint32_t),
+        .data = data.indices.data(),
+        .debug_name = std::format("GLTF Model ({}) Index Buffer", debug_name),
+    });
 }
 
 GLTFModel::~GLTFModel() {
-    m_vertex_buffer.reset();
-    m_index_buffer.reset();
+    m_asset_manager.DestroyBuffer(m_vertex_buffer);
+    m_asset_manager.DestroyBuffer(m_index_buffer);
 }
 
 // void GLTFModel::PlayAnimation(uint32_t index, float time, bool loop) {
@@ -330,6 +330,14 @@ void GLTFModel::ForEachNode(const std::function<void(const Node &node)> &callbac
         if (node)
             callback(*node);
     }
+}
+
+const VulkanBuffer &GLTFModel::VertexBuffer() const {
+    return m_asset_manager.GetBuffer(m_vertex_buffer);
+}
+
+const VulkanBuffer &GLTFModel::IndexBuffer() const {
+    return m_asset_manager.GetBuffer(m_index_buffer);
 }
 
 const GLTFModel::Node &GLTFModel::GetNode(uint32_t index) const {
@@ -479,7 +487,7 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
                 return static_cast<std::byte>(byte);
             });
 
-            TextureData texture_data {
+            Texture texture_data {
                 .extent = glm::uvec2(image.width, image.height),
                 .format = format,
                 .pixels = std::move(image_data),

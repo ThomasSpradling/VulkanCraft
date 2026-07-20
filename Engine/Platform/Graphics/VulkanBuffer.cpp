@@ -60,6 +60,14 @@ std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build() {
     VmaAllocationInfo allocation_info;
     VK_CHECK(vmaCreateBuffer(m_device.Allocator(), &buffer_create_info, &allocation_create_info, &buffer, &allocation, &allocation_info));
 
+    VkMemoryRequirements requirements {};
+    vkGetBufferMemoryRequirements(m_device.Device(), buffer, &requirements);
+
+    bool is_coherent = false;
+    if (requirements.memoryTypeBits & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
+        is_coherent = true;
+    }
+
     auto vk_buffer = std::make_unique<VulkanBuffer>(m_device);
     vk_buffer->m_size = m_size;
     vk_buffer->m_usage = m_usage;
@@ -69,6 +77,7 @@ std::unique_ptr<VulkanBuffer> VulkanBufferBuilder::Build() {
     vk_buffer->m_memory_flags = m_memory_flags;
     vk_buffer->m_initialized = true;
     vk_buffer->m_queue_families = m_queue_families;
+    vk_buffer->m_is_coherent = is_coherent;
 
     if (m_data != nullptr) {
         vk_buffer->Upload(m_data, m_size);
@@ -89,6 +98,10 @@ VulkanBuffer::~VulkanBuffer() {
     vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
 }
 
+void VulkanBuffer::Destroy() {
+    vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
+}
+
 void VulkanBuffer::SetDebugName(std::string_view name) const {
     m_device.SetDebugName(m_buffer, name);
 }
@@ -106,6 +119,20 @@ void *VulkanBuffer::Mapped() {
         "Cannot map memory of VulkanBuffer without VMA_ALLOCATION_CREATE_MAPPED_BIT set!");
 
     return m_allocation_info.pMappedData;
+}
+
+void VulkanBuffer::FlushMappedMemory(VkDeviceSize offset, VkDeviceSize size) {
+    if (!IsMapped())
+        return;
+    
+    VK_CHECK(vmaFlushAllocation(m_device.Allocator(), m_allocation, offset, size));
+}
+
+void VulkanBuffer::InvalidateMappedMemory(VkDeviceSize offset, VkDeviceSize size) {
+    if (!IsMapped())
+        return;
+
+    VK_CHECK(vmaInvalidateAllocation(m_device.Allocator(), m_allocation, offset, size));
 }
 
 void VulkanBuffer::Resize(VkDeviceSize size) {
@@ -135,16 +162,24 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
     Assert(offset <= m_size || offset < 0, "Upload offset is outside the buffer.");
     Assert(bytes <= m_size - offset, "Upload exceeds buffer size.");
 
+    const bool mapped = (m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) != 0;
     const bool has_host_access = (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) != 0
         || (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0;
     const bool accepts_transfer = (m_usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) != 0;
 
-    Assert(has_host_access || accepts_transfer, "Cannot upload to buffer that is neither mapped nor accepts transfers! "
-                            "You must either include the usage VK_BUFFER_USAGE_TRANSFER_DST_BIT or "
-                            "include the memory flag VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT.");
+    Assert((has_host_access & mapped) || accepts_transfer, "In order to upload data, it must either be mapped or allow for transfers!");
 
-    if (has_host_access) {
-        VK_CHECK(vmaCopyMemoryToAllocation(m_device.Allocator(), data, m_allocation, offset, bytes));
+    if (mapped && has_host_access) {
+        uint8_t *dst = static_cast<uint8_t *>(m_allocation_info.pMappedData) + offset;
+        if (data) {
+            std::memcpy(dst, data, bytes);
+        } else {
+            std::memset(dst, 0, bytes);
+        }
+
+        if (!m_is_coherent)
+            FlushMappedMemory(offset, bytes);
+
         return;
     }
 
@@ -164,4 +199,45 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
         };
         vkCmdCopyBuffer(cmd.Handle(), staging_buffer->Buffer(), m_buffer, 1, &copy_region);
     });
+}
+
+void *VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
+    Assert(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
+    Assert(offset <= m_size || offset < 0, "Download offset is outside the buffer.");
+    Assert(bytes <= m_size - offset, "Download exceeds buffer size.");
+    
+    const bool mapped = (m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) != 0;
+    const bool has_host_access = (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0;
+    const bool accepts_transfer = (m_usage & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0;
+
+    Assert((mapped & has_host_access) | accepts_transfer, "In order to download data, it must either be mapped or allow for transfers!");
+
+    if (mapped && has_host_access) {
+        uint8_t *src = static_cast<uint8_t *>(m_allocation_info.pMappedData) + offset;
+
+        if (!m_is_coherent)
+            InvalidateMappedMemory(offset, bytes);
+
+        void *dst = nullptr;
+        std::memcpy(dst, src, bytes);
+        return dst;
+    }
+
+    auto staging_buffer = VulkanBuffer::BufferBuilder(m_device)
+        .Size(bytes)
+        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+        .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
+        .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+        .Build();
+
+    m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        VkBufferCopy copy_region {
+            .srcOffset = offset,
+            .dstOffset = 0,
+            .size = bytes,
+        };
+        vkCmdCopyBuffer(cmd.Handle(), m_buffer, staging_buffer->Buffer(), 1, &copy_region);
+    });
+
+    return staging_buffer->ReadData(bytes, offset);
 }

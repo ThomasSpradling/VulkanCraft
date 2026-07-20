@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IClientGame.h"
+#include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Sockets/SocketAPI.h"
 #include "Platform/Window/Window.h"
 #include <memory>
@@ -37,6 +38,8 @@ private:
     bool m_running = false;
 
     std::unique_ptr<Window> m_window;
+    std::unique_ptr<VulkanDevice> m_device;
+
     std::unique_ptr<InputHandler> m_input_handler;
     std::unique_ptr<Renderer> m_renderer;
 
@@ -52,6 +55,7 @@ private:
     const double FpsRecordTime = 500.0; // ms
     uint32_t m_fps = 0;
 private:
+    void Initialize(ClientContext &context);
     void Update(double delta_time, ClientContext &context);
     void Render(double delta_time, ClientContext &context);
 };

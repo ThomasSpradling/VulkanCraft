@@ -3,6 +3,7 @@ add_library(engine_asset_manager STATIC
     GLTFModel.cpp
     Mesh.cpp
     Shape.cpp
+    Texture.cpp
 )
 
 target_link_libraries(engine_asset_manager PUBLIC

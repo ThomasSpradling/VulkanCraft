@@ -1,48 +1,59 @@
 #include "AssetManager.h"
+#include "Buffer.h"
 #include "Core/Handle.h"
 #include "Platform/Graphics/CommandBuffer.h"
+#include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanImage.h"
 #include "GLTFModel.h"
 #include "Texture.h"
 
-AssetManager::AssetManager(const VulkanDevice &device, BindlessDescriptorTable &descriptor_table)
+#include <future>
+#include <sstream>
+#include <stb_image.h>
+
+AssetManager::AssetManager(const VulkanDevice &device, GarbageCollector &garbage_collector, BindlessDescriptorTable &descriptor_table)
     : m_device(device)
     , m_bindless_table(descriptor_table)
+    , m_garbage_collector(garbage_collector)
 {
-    m_pbr_material_buffer = VulkanBuffer::BufferBuilder(device)
-        .Size(sizeof(GPUMetallicRoughnessMaterial) * MaxPbrMaterials)
-        .AddUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-        .Build();
+    m_pbr_material_buffer = CreateBuffer(GPUBufferData {
+        .usage = BufferUsageBits::Storage,
+        .size = sizeof(GPUMetallicRoughnessMaterial) * MaxPbrMaterials,
+    });
 
-    m_basic_material_buffer = VulkanBuffer::BufferBuilder(device)
-        .Size(sizeof(GPUBasicMaterial) * MaxBasicMaterials)
-        .AddUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        .AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-        .AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-        .Build();
+    m_basic_material_buffer = CreateBuffer(GPUBufferData {
+        .usage = BufferUsageBits::Storage,
+        .size = sizeof(GPUBasicMaterial) * MaxBasicMaterials,
+    });
 
     GPUMetallicRoughnessMaterial default_pbr {};
     GPUBasicMaterial default_basic {};
 
-    m_pbr_material_buffer->UploadAt(&default_pbr, 0);
-    m_basic_material_buffer->UploadAt(&default_basic, 0);
+    GetBuffer(m_pbr_material_buffer).UploadAt(&default_pbr, 0);
+    GetBuffer(m_pbr_material_buffer).UploadAt(&default_basic, 0);
 }
 
 AssetManager::~AssetManager() {
-    m_basic_material_buffer.reset();
-    m_pbr_material_buffer.reset();
+    m_gltf_models.Clear();
+    m_meshes.Clear();
+    m_buffers.Clear();
 }
 
+// void AssetManager::RunDeferredTasks() {
+//     for (std::packaged_task<void()> &task : m_deferred_tasks) {
+//         task();
+//     }
+//     m_deferred_tasks.clear();
+// }
+
 GLTFHandle AssetManager::LoadGLTF(const std::filesystem::path &path) {
-    auto current_model = std::make_unique<GLTFModel>(m_device, *this, path);
+    auto current_model = std::make_unique<GLTFModel>(*this, path);
     return m_gltf_models.Add(current_model);
 }
 
 MeshHandle AssetManager::CreateMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices) {
-    auto current_mesh = std::make_unique<Mesh>(m_device, vertices, indices);
+    auto current_mesh = std::make_unique<Mesh>(*this, vertices, indices);
     return m_meshes.Add(current_mesh);
 }
 
@@ -67,6 +78,16 @@ const GLTFModel &AssetManager::GetGLTF(GLTFHandle gltf) {
 
 const Mesh &AssetManager::GetMesh(MeshHandle mesh) {
     return *m_meshes.Get(mesh);
+}
+
+void AssetManager::DestroyMesh(MeshHandle handle) {
+    std::unique_ptr<Mesh> mesh = m_meshes.TakeOwnership(handle);
+    mesh.reset();
+}
+
+void AssetManager::DestroyGLTF(GLTFHandle handle) {
+    std::unique_ptr<GLTFModel> mesh = m_gltf_models.TakeOwnership(handle);
+    mesh.reset();
 }
 
 MaterialHandle AssetManager::CreateMaterial(const MetallicRoughnessMaterial &material) {
@@ -107,7 +128,7 @@ MaterialHandle AssetManager::CreateMaterial(const MetallicRoughnessMaterial &mat
 
     if (m_pbr_material_buffer_index + 1 < MaxPbrMaterials) {
         m_pbr_material_buffer_index++;
-        m_pbr_material_buffer->UploadAt(&gpu_material, m_pbr_material_buffer_index);
+        GetBuffer(m_pbr_material_buffer).UploadAt(&gpu_material, m_pbr_material_buffer_index);
     }
 
     MaterialRecord record {
@@ -126,7 +147,7 @@ MaterialHandle AssetManager::CreateMaterial(const BasicMaterial &material) {
 
     if (m_basic_material_buffer_index + 1 < MaxBasicMaterials) {
         m_basic_material_buffer_index++;
-        m_basic_material_buffer->UploadAt(&gpu_material, m_basic_material_buffer_index);
+        GetBuffer(m_basic_material_buffer).UploadAt(&gpu_material, m_basic_material_buffer_index);
     }
 
     MaterialRecord record {
@@ -138,6 +159,10 @@ MaterialHandle AssetManager::CreateMaterial(const BasicMaterial &material) {
 
 const AssetManager::MaterialRecord &AssetManager::GetMaterial(MaterialHandle material) {
     return m_materials.Get(material);
+}
+
+void AssetManager::DestroyMaterial(MaterialHandle handle) {
+    // no op
 }
 
 SamplerHandle AssetManager::CreateSampler(const TextureSamplerData &sampler) {
@@ -202,7 +227,34 @@ std::pair<SamplerId, VkSampler> AssetManager::GetSampler(SamplerHandle sampler) 
     return std::make_pair(sampler_id, vulkan_sampler);
 }
 
-TextureHandle AssetManager::CreateTexture(const TextureData &texture) {
+TextureHandle AssetManager::LoadTexture(const std::filesystem::path &path, TextureFormat format) {
+    if (format != TextureFormat::RGBA8 && format != TextureFormat::RGBA8Srgb)
+        throw std::runtime_error("STB texture loading only supports RGBA8 formats");
+
+    int width = 0;
+    int height = 0;
+    int channel_count = 0;
+
+    stbi_uc *loaded_pixels = stbi_load(path.string().c_str(), &width, &height, &channel_count, STBI_rgb_alpha);
+    if (loaded_pixels == nullptr)
+        throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
+
+    size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+
+    Texture texture {
+        .extent = glm::uvec2(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+        .format = format,
+        .pixels = std::vector<std::byte>(byte_count),
+        .generate_mipmaps = true,
+    };
+
+    std::memcpy(texture.pixels.data(), loaded_pixels, byte_count);
+    stbi_image_free(loaded_pixels);
+
+    return CreateTexture(texture);
+}
+
+TextureHandle AssetManager::CreateTexture(const Texture &texture) {
     const auto get_texture_format = [](TextureFormat format) -> VkFormat {
         switch (format) {
             case TextureFormat::R8:
@@ -251,6 +303,86 @@ TextureHandle AssetManager::CreateTexture(const TextureData &texture) {
     return m_textures.Add(record);
 }
 
+BufferHandle AssetManager::CreateBuffer(const GPUBufferData &buffer) {
+    auto builder = VulkanBuffer::BufferBuilder(m_device);
+    
+    std::stringstream debug_name;
+
+    switch (buffer.storage_type) {
+        case StorageType::Device: {
+            builder.AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            builder.AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+            debug_name << "Device Local";
+            break;
+        }
+        case StorageType::HostVisible: {
+            builder.AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT);
+            builder.AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT);
+
+            debug_name << "Host Visible";
+            break;
+        }
+        case StorageType::MemoryLess: {
+            debug_name << "Memoryless";
+            break;
+        }
+    }
+
+    if (static_cast<uint8_t>(buffer.usage & BufferUsageBits::Vertex))
+        builder.AddUsage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    if (static_cast<uint8_t>(buffer.usage & BufferUsageBits::Index))
+        builder.AddUsage(VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+    if (static_cast<uint8_t>(buffer.usage & BufferUsageBits::Uniform)) {
+        builder.AddUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        builder.AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    }
+
+    if (static_cast<uint8_t>(buffer.usage & BufferUsageBits::Storage)) {
+        builder.AddUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        builder.AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+        builder.AddUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    }
+
+    if (static_cast<uint8_t>(buffer.usage & BufferUsageBits::Indirect)) {
+        builder.AddUsage(VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+        builder.AddUsage(VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    }
+
+    debug_name << " Buffer";
+
+    if (!buffer.debug_name.empty()) {
+        debug_name << ": " << buffer.debug_name;
+    }
+
+    builder.Size(buffer.size);
+
+    std::unique_ptr<VulkanBuffer> vk_buffer = builder.Build();
+    if (buffer.data != nullptr)
+        vk_buffer->Upload(buffer.data, buffer.size);
+
+    vk_buffer->SetDebugName(debug_name.str());
+    return m_buffers.Add(vk_buffer);
+}
+
+VulkanBuffer &AssetManager::GetBuffer(BufferHandle buffer) {
+    return *m_buffers.Get(buffer);
+}
+
+const VulkanBuffer &AssetManager::GetBuffer(BufferHandle buffer) const {
+    return *m_buffers.Get(buffer);
+}
+
+void AssetManager::DestroyBuffer(BufferHandle handle) {
+    std::unique_ptr<VulkanBuffer> buffer = m_buffers.TakeOwnership(handle);
+
+    m_garbage_collector.Enqueue(std::packaged_task<void()>([buffer = std::move(buffer)]() mutable {
+        buffer.reset();
+    }));
+}
+
 std::pair<TextureId, std::reference_wrapper<VulkanImage>> AssetManager::GetTexture(TextureHandle texture) {
     TextureId texture_id = m_textures.Get(texture).texture_id;
     VulkanImage &image = m_bindless_table.GetTexture(texture_id);
@@ -264,6 +396,14 @@ TextureId AssetManager::GetTextureId(TextureHandle texture) {
     return m_textures.Get(texture).texture_id;
 }
 
+void AssetManager::DestroyTexture(TextureHandle handle) {
+    TextureRecord image = m_textures.TakeOwnership(handle);
+
+    m_garbage_collector.Enqueue(std::packaged_task<void()>([this, image]() {
+        m_bindless_table.RemoveTexture(image.texture_id);
+    }));
+}
+
 SamplerId AssetManager::GetSamplerId(SamplerHandle sampler) {
     if (!sampler)
         return DefaultSamplerId;
@@ -271,13 +411,21 @@ SamplerId AssetManager::GetSamplerId(SamplerHandle sampler) {
     return m_samplers.Get(sampler).sampler_id;
 }
 
+void AssetManager::DestroySampler(SamplerHandle handle) {
+    SamplerRecord sampler = m_samplers.TakeOwnership(handle);
+
+    m_garbage_collector.Enqueue(std::packaged_task<void()>([this, sampler]() {
+        m_bindless_table.RemoveSampler(sampler.sampler_id);
+    }));
+}
+
 const VulkanBuffer &AssetManager::MaterialBuffer(MaterialType type) const {
     switch (type) {
         case MaterialType::MetallicRoughness:
-            return *m_pbr_material_buffer;
+            return GetBuffer(m_pbr_material_buffer);
 
         case MaterialType::Basic:
-            return *m_basic_material_buffer;
+            return GetBuffer(m_basic_material_buffer);
     }
 
     std::unreachable();

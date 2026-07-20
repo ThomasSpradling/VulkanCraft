@@ -33,24 +33,15 @@ private:
     std::span<uint32_t> m_queue_families {}; // Queue families that may access this memory
 };
 
-enum class BufferUsage : uint8_t {
-    None        = 0,
-    Index       = 1 << 0,
-    Vertex      = 1 << 1,
-    Uniform     = 1 << 2,
-    Storage     = 1 << 3,
-    Indirect    = 1 << 4,
-    IndirectStorage = Storage | Indirect,
-};
-
 class VulkanBuffer : public NonCopyable {
     friend VulkanBufferBuilder;
 public:
     VulkanBuffer(const VulkanDevice &device);
     ~VulkanBuffer();
 
-    static inline VulkanBufferBuilder BufferBuilder(const VulkanDevice &device) { return VulkanBufferBuilder(device); }
+    void Destroy();
 
+    static inline VulkanBufferBuilder BufferBuilder(const VulkanDevice &device) { return VulkanBufferBuilder(device); }
     void SetDebugName(std::string_view name) const;
 
     VkBuffer Buffer() const { return m_buffer; }
@@ -59,15 +50,19 @@ public:
 
     VkDeviceAddress DeviceAddress() const;
 
+    bool IsMapped() const { return m_allocation_info.pMappedData != nullptr; }
+
     void *Mapped();
+    void FlushMappedMemory(VkDeviceSize offset, VkDeviceSize size);
+    void InvalidateMappedMemory(VkDeviceSize offset, VkDeviceSize size);
 
     // Resizes buffer.
     // Warning: Does not check or handle any synchronization to ensure that
     // this buffer is not in use. This MUST be handled by the caller! Therefore,
     // for now, one should NOT call this often!
     void Resize(VkDeviceSize size);
-
     void Upload(const void *data, VkDeviceSize bytes, VkDeviceSize offset = 0ull);
+    void *ReadData(VkDeviceSize bytes, VkDeviceSize offset = 0ull);
     
     // Upload data to index, viewing this buffer as an array<T>
     template <typename T>
@@ -88,6 +83,7 @@ private:
     const VulkanDevice &m_device;
 
     bool m_initialized = false;
+    bool m_is_coherent = false;
 
     VkDeviceSize m_size = 0ull;
     VkBufferUsageFlags m_usage = 0;

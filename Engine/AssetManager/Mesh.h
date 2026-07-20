@@ -14,17 +14,20 @@ struct MeshVertex {
     glm::vec4 weights0 {};
 };
 
+class AssetManager;
 class Mesh {
 public:
-    Mesh(const VulkanDevice &device, const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices);
+    Mesh(AssetManager &asset_manager, const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices, const std::string &debug_name = "");
     ~Mesh();
 
-    const VulkanBuffer &VertexBuffer() const { return *m_vertex_buffer; }
-    const VulkanBuffer &IndexBuffer() const { return *m_index_buffer; }
+    const VulkanBuffer &VertexBuffer() const;
+    const VulkanBuffer &IndexBuffer() const;
     uint32_t IndexCount() const { return m_index_count; }
 private:
-    std::unique_ptr<VulkanBuffer> m_vertex_buffer {};
-    std::unique_ptr<VulkanBuffer> m_index_buffer {};
+    AssetManager &m_assets;
+
+    BufferHandle m_vertex_buffer {};
+    BufferHandle m_index_buffer {};
 
     uint32_t m_index_count = 0;
 };

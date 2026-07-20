@@ -13,11 +13,19 @@ enum class TextureFormat : uint8_t {
     RGBA32Float,
 };
 
-struct TextureData {
+struct Texture {
     glm::uvec2 extent {};
     TextureFormat format = TextureFormat::RGBA8;
     std::vector<std::byte> pixels;
     bool generate_mipmaps = false;
+
+    static Texture Checkerboard(
+        glm::uvec2 extent = glm::uvec2(256),
+        uint32_t square_size = 32,
+        glm::u8vec4 color0 = glm::u8vec4(255),
+        glm::u8vec4 color1 = glm::u8vec4(0, 0, 0, 255),
+        TextureFormat format = TextureFormat::RGBA8Srgb
+    );
 };
 
 enum class SamplerFilter : uint8_t {

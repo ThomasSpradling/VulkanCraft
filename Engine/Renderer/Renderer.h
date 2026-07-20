@@ -3,14 +3,16 @@
 // #include "Camera.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
-#include "Platform/Graphics/VulkanBuffer.h"
+#include "GarbageCollector.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanSwapChain.h"
 #include "Platform/Window/Window.h"
 #include "Platform/Graphics/ShaderCompiler.h"
 #include "Platform/Graphics/VulkanPipeline.h"
+#include <future>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "Core/Handle.h"
 #include "Renderer/BindlessDescriptorTable.h"
@@ -49,19 +51,12 @@ struct SceneRenderOptions {
     bool render_debug_geometry = true;
 };
 
-// struct MeshVertex {
-//     glm::vec3 position;
-//     float uv_x;
-//     glm::vec3 normal;
-//     float uv_y;
-//     glm::vec4 color;
-// };
-
 class Renderer : public NonCopyable, public NonMovable {
 public:
-    Renderer(const Window &window);
+    Renderer(const VulkanDevice &device, const Window &window);
     ~Renderer();
 
+    void Initialize();
     void Configure(const RendererSettings &settings);
     RendererSettings Settings() const;
     
@@ -78,9 +73,10 @@ public:
 
     void RenderScene(World &world, Entity camera, const SceneRenderOptions &options = {});
     void AttachAssetManager(AssetManager &manager) { m_asset_manager = &manager; }
-    const VulkanDevice &Device() const { return *m_device; }
+    const VulkanDevice &Device() const { return m_device; }
 
     BindlessDescriptorTable &BindlessTable() { return *m_bindless_table; }
+    GarbageCollector &GPUGargbageCollector() { return *m_garbage_collector; }
 private:
     struct FrameContext {
         std::unique_ptr<VulkanCommandPool> command_pool;
@@ -88,11 +84,11 @@ private:
 
         std::unique_ptr<VulkanFence> graphics_submit_fence;
         std::unique_ptr<VulkanSemaphore> image_available;
-        std::unique_ptr<VulkanBuffer> scene_uniform_buffer;
+        BufferHandle scene_uniform_buffer = BufferHandle::Invalid();
 
         // Lights
-        std::unique_ptr<VulkanBuffer> light_data;
-        std::unique_ptr<VulkanBuffer> point_lights;
+        BufferHandle light_data = BufferHandle::Invalid();
+        BufferHandle point_lights = BufferHandle::Invalid();
     };
     
     struct SwapChainContext {
@@ -124,6 +120,7 @@ private:
     };
 private:
     static constexpr uint32_t MaxFramesInFlight = 3;
+    const VulkanDevice &m_device;
     const Window &m_window;
 
     AssetManager *m_asset_manager = nullptr;
@@ -132,7 +129,6 @@ private:
     bool m_enable_vsync = false;
 
     // GPU Context
-    std::unique_ptr<VulkanDevice> m_device = nullptr;
     std::unique_ptr<VulkanSwapChain> m_swapchain = nullptr;
     std::unique_ptr<ShaderCompiler> m_shader_compiler = nullptr;
 
@@ -153,6 +149,7 @@ private:
     SpecializationConstantData m_specialization_constant;
 
     std::unique_ptr<BindlessDescriptorTable> m_bindless_table;
+    std::unique_ptr<GarbageCollector> m_garbage_collector;
 private:
     // void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
 

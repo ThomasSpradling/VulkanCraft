@@ -52,7 +52,7 @@ public:
         uint32_t normal_texcoord = 0;
     };
 public:
-    GLTFModel(const VulkanDevice &device, AssetManager &asset_manager, const std::filesystem::path &file_path);
+    GLTFModel(AssetManager &asset_manager, const std::filesystem::path &file_path);
     ~GLTFModel();
 
     void GetCameras();
@@ -62,13 +62,13 @@ public:
 
     void ForEachNode(const std::function<void(Node &)> &callback);
     void ForEachNode(const std::function<void(const Node &)> &callback) const;
-    const VulkanBuffer &VertexBuffer() const { return *m_vertex_buffer; }
-    const VulkanBuffer &IndexBuffer() const { return *m_index_buffer; }
+    const VulkanBuffer &VertexBuffer() const;
+    const VulkanBuffer &IndexBuffer() const;
 
     uint32_t NodeCount() const { return static_cast<uint32_t>(m_linear_nodes.size()); }
     const Node &GetNode(uint32_t index) const;
 private:
-    struct Texture {
+    struct GLTFTexture {
         TextureHandle srgb_texture = TextureHandle::Invalid();
         TextureHandle unorm_texture = TextureHandle::Invalid();
 
@@ -119,7 +119,7 @@ private:
 private:
     using ComponentType = std::variant<int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, float>;
 private:
-    const VulkanDevice &m_device;
+    // const VulkanDevice &m_device;
     AssetManager &m_asset_manager;
 
     struct VertexData {
@@ -132,12 +132,12 @@ private:
     // Flattened array of all nodes
     std::vector<std::shared_ptr<Node>> m_linear_nodes {};
 
-    std::vector<Texture> m_textures {};
+    std::vector<GLTFTexture> m_textures {};
     std::vector<Material> m_materials {};
     std::vector<Animation> m_animations {};
 
-    std::unique_ptr<VulkanBuffer> m_vertex_buffer;
-    std::unique_ptr<VulkanBuffer> m_index_buffer;
+    BufferHandle m_vertex_buffer;
+    BufferHandle m_index_buffer;
 private:
     void LoadMaterials(tinygltf::Model &model);
     void LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &model, VertexData &data);

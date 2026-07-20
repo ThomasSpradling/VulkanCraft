@@ -19,13 +19,12 @@ void SimpleGame::Initialize(ClientContext &context) {
     // context.renderer.EnableVSync();
 
     //// Objects ////
-
     MaterialHandle gray_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
         .base_color_factor = glm::vec4(0.0f, 0.5f, 0.3f, 1.0f),
         .metallic_factor = 0.0f,
         .roughness_factor = 0.4f,
     });
-    MeshHandle cone_mesh = context.assets.CreateMesh(Shape::UVShape(
+    MeshHandle torus_mesh = context.assets.CreateMesh(Shape::UVShape(
         64,
         24,
         [&](float u, float v) -> glm::vec3 {
@@ -44,14 +43,14 @@ void SimpleGame::Initialize(ClientContext &context) {
         }
     ));
 
-    Entity cone = context.world.CreateEntity("Cone");
-    context.world.Add<ProceduralMeshComponent>(cone, ProceduralMeshComponent {
-        .mesh = cone_mesh,
+    Entity torus = context.world.CreateEntity("Torus");
+    context.world.Add<ProceduralMeshComponent>(torus, ProceduralMeshComponent {
+        .mesh = torus_mesh,
         .material = gray_material,
     });
 
-    // GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
-    // context.world.BuildGLTF(bottle);
+    // GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/WaterBottle.glb");
+    // Entity bottle_entity = context.world.BuildGLTF(bottle);
     // auto &bottle_transform = context.world.Get<Transform>(bottle_entity);
     // bottle_transform.scale *= 10.0f;
 

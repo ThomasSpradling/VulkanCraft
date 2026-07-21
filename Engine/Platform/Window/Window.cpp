@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <imgui.h>
+
 Window::Window(const WindowConfig &config) {
     glfwSetErrorCallback(Window::ErrorCallback);
     if (!glfwInit()) {

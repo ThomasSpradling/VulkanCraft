@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 enum class TextureFormat : uint8_t {

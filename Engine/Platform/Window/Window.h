@@ -15,6 +15,8 @@ struct WindowConfig {
     glm::ivec2 resolution = glm::ivec2(1280, 720);
     std::string title = "Simple Window";
     bool fullscreen = false;
+
+    bool enable_imgui = true;
 };
 
 class Window : public NonMovable, public NonCopyable {
@@ -58,6 +60,8 @@ private:
         } wheel;
     } m_mouse;
 private:
+    bool m_enable_imgui = false;
+
     bool m_window_resized = false;
     bool m_window_iconified = false;
 

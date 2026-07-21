@@ -1,6 +1,7 @@
 #include "ClientApplication.h"
 #include <algorithm>
 #include <chrono>
+#include <imgui_internal.h>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -17,9 +18,10 @@
 ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig &config)
     : m_game(game)
 {
-    m_window = std::make_unique<Window>(WindowConfig{
+    m_window = std::make_unique<Window>(WindowConfig {
         .resolution = glm::vec2(config.window_width, config.window_height),
         .title = config.window_title,
+        .enable_imgui = config.enable_imgui,
     });
 
     m_device = std::make_unique<VulkanDevice>(*m_window);
@@ -28,7 +30,7 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
     m_update_rate = config.update_rate;
     
     m_renderer = std::make_unique<Renderer>(*m_device, *m_window);
-    m_asset_manager = std::make_unique<AssetManager>(*m_device, m_renderer->GPUGargbageCollector(), m_renderer->BindlessTable());
+    m_asset_manager = std::make_unique<AssetManager>(*m_device, m_renderer->BindlessTable());
     m_renderer->AttachAssetManager(*m_asset_manager);
 
     m_world = std::make_unique<World>(*m_asset_manager);

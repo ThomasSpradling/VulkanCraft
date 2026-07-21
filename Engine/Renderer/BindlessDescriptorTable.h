@@ -8,18 +8,21 @@
 #include "Core/IndexFreeList.h"
 
 [[maybe_unused]] constexpr uint32_t MaxTextures               = 16'384;
+[[maybe_unused]] constexpr uint32_t MaxCubeTextures           = 256;
 [[maybe_unused]] constexpr uint32_t MaxSamplers               = 256;
 [[maybe_unused]] constexpr uint32_t MaxStorageImages          = 2'048;
 [[maybe_unused]] constexpr uint32_t MaxAccelerationStructures = 16;
 
 enum class DescriptorBinding : uint8_t {
-    Textures               = 0,
-    Samplers               = 1,
-    StorageImages          = 2,
-    AccelerationStructures = 3,
+    Textures_2D            = 0,
+    Textures_Cube          = 1,
+    Samplers               = 2,
+    StorageImages          = 3,
+    AccelerationStructures = 4,
 };
 
 inline constexpr TextureId DefaultTextureId = 0;
+inline constexpr TextureId DefaultCubeTextureId = 0;
 inline constexpr SamplerId DefaultSamplerId = 0;
 inline constexpr StorageImageId DefaultStorageImageId = 0;
 inline constexpr AccelerationStructureId DefaultAccelerationStructureId = 0;
@@ -58,6 +61,7 @@ private:
     VkDescriptorSet m_global_descriptor_set = VK_NULL_HANDLE;
 
     IndexFreeList<MaxTextures> m_texture_ids;
+    IndexFreeList<MaxTextures> m_cube_texture_ids;
     IndexFreeList<MaxSamplers> m_sampler_ids;
     IndexFreeList<MaxStorageImages> m_storage_image_ids;
     IndexFreeList<MaxAccelerationStructures> m_acceleration_structure_ids;

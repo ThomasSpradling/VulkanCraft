@@ -14,6 +14,8 @@ struct ClientEngineConfig {
 
     std::string window_title = "Vulkan Engine";
 
+    bool enable_imgui = true;
+
     uint32_t update_rate = 120;
     std::optional<uint32_t> target_fps = std::nullopt; // If nullopt, then uncapped FPS
 };

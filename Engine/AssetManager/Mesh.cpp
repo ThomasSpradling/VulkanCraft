@@ -7,6 +7,7 @@ Mesh::Mesh(AssetManager &asset_manager, const std::vector<MeshVertex> &vertices,
 {
     m_vertex_buffer = asset_manager.CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Storage,
+        .storage_type = StorageType::Device,
         .size = vertices.size() * sizeof(MeshVertex),
         .data = vertices.data(),
         .debug_name = std::format("Mesh ({}) Vertex Buffer", debug_name),
@@ -14,6 +15,7 @@ Mesh::Mesh(AssetManager &asset_manager, const std::vector<MeshVertex> &vertices,
 
     m_index_buffer = asset_manager.CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Index,
+        .storage_type = StorageType::Device,
         .size = indices.size() * sizeof(uint32_t),
         .data = indices.data(),
         .debug_name = std::format("Mesh ({}) Index Buffer", debug_name),

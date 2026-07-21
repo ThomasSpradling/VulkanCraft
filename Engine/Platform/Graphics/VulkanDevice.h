@@ -7,6 +7,7 @@
 #include "Core/NonMovable.h"
 #include "Common.h"
 #include "Platform/Window/Window.h"
+#include "GarbageCollector.h"
 #include "VulkanObjects.h"
 
 struct DeviceConfig {
@@ -51,6 +52,7 @@ public:
     VkPhysicalDevice PhysicalDevice() const { return m_physical_device; }
     VkSurfaceKHR Surface() const { return m_surface; }
     VmaAllocator Allocator() const { return m_allocator; }
+    GarbageCollector &GetGarbageCollector() const { return *m_garbage_collector; }
 
     VkFormat GetLinearColorFormat() const { return m_image_formats.linear_color; }
     VkFormat GetNonLinearColorFormat() const { return m_image_formats.nonlinear_color; }
@@ -152,6 +154,8 @@ private:
     VmaAllocator m_allocator = nullptr;
 
     ImageFormats m_image_formats {};
+
+    std::unique_ptr<GarbageCollector> m_garbage_collector;
 private:
     void CreateVulkanInstance();
     void DestroyVulkanInstance();

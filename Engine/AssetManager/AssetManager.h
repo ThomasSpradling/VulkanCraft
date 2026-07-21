@@ -16,7 +16,6 @@
 #include <type_traits>
 #include <vector>
 #include "Core/ResourcePool.h"
-#include "Renderer/GarbageCollector.h"
 
 [[maybe_unused]] constexpr uint32_t MaxPbrMaterials = 1'024;
 [[maybe_unused]] constexpr uint32_t MaxBasicMaterials = 1'024;
@@ -42,7 +41,7 @@ public:
         SamplerId sampler_id;
     };
 public:
-    AssetManager(const VulkanDevice &device, GarbageCollector &garbage_collector, BindlessDescriptorTable &descriptor_table);
+    AssetManager(VulkanDevice &device, BindlessDescriptorTable &descriptor_table);
     ~AssetManager();
     
     TextureHandle LoadTexture(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb);
@@ -77,7 +76,7 @@ public:
     void DestroyTexture(TextureHandle handle);
     void DestroyBuffer(BufferHandle handle);
 private:
-    const VulkanDevice &m_device;
+    VulkanDevice &m_device;
 
     ResourcePool<std::unique_ptr<GLTFModel>, GLTFHandleTag> m_gltf_models;
     ResourcePool<std::unique_ptr<Mesh>, MeshHandleTag> m_meshes;
@@ -98,7 +97,6 @@ private:
     uint32_t m_basic_material_buffer_index = 0;
 
     BindlessDescriptorTable &m_bindless_table;
-    GarbageCollector &m_garbage_collector;
 private:
     TextureId GetTextureId(TextureHandle texture);
     SamplerId GetSamplerId(SamplerHandle sampler);

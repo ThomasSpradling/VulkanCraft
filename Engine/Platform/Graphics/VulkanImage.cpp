@@ -3,6 +3,7 @@
 #include "VulkanBuffer.h"
 #include <algorithm>
 #include <format>
+#include <future>
 #include <memory>
 #include "CommandBuffer.h"
 #include "VulkanDevice.h"
@@ -266,6 +267,112 @@ VkImageView VulkanImage::CreateImageView(VkImageSubresourceRange subresource_ran
 
 void VulkanImage::Upload(const void *data, VkDeviceSize bytes) {
     UploadLayers(data, bytes, 0, m_array_layers);
+}
+
+void VulkanImage::Upload(const CommandBuffer &cmd, TextureRange range, const void *data, uint32_t buffer_row_length) {
+    Assert(data != nullptr, "Cannot upload null texture data.");
+    Assert(glm::all(glm::greaterThan(range.dimensions, glm::uvec3(0))), "Texture upload dimensions must be non-zero.");
+    Assert(glm::all(glm::greaterThanEqual(range.offset, glm::ivec3(0))), "Texture upload offset cannot be negative.");
+    Assert(range.num_layers > 0, "Texture upload must contain at least one layer.");
+    Assert(range.num_mip_levels > 0, "Texture upload must contain at least one mip level.");
+
+    Assert(range.layer < m_array_layers && range.num_layers <= m_array_layers - range.layer,
+        std::format("Texture layer range [{}..{}) exceeds the image's {} layers.", range.layer, range.layer + range.num_layers, m_array_layers));
+
+    Assert(range.mip_levels < m_mip_levels && range.num_mip_levels <= m_mip_levels - range.mip_levels,
+        std::format("Texture mip range [{}..{}) exceeds the image's {} mip levels.", range.mip_levels,
+            range.mip_levels + range.num_mip_levels, m_mip_levels));
+
+    Assert(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || m_layout == VK_IMAGE_LAYOUT_GENERAL ||
+        m_layout == VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR,
+        "Cannot upload image unless its layout is TRANSFER_DST_OPTIMAL, GENERAL, or SHARED_PRESENT_KHR.");
+
+    const auto mip_dimension = [](uint32_t value, uint32_t mip) { return std::max(1u, value >> mip); };
+    const auto mip_offset = [](int32_t value, uint32_t mip) { return static_cast<int32_t>(static_cast<uint32_t>(value) >> mip); };
+    const auto image_mip_extent = [&](uint32_t mip) {
+        return VkExtent3D {
+            .width = mip_dimension(m_extent.width, mip),
+            .height = mip_dimension(m_extent.height, mip),
+            .depth = mip_dimension(m_extent.depth, mip),
+        };
+    };
+
+    const VkDeviceSize bytes_per_pixel = GetBytesPerPixel(m_format);
+    VkDeviceSize staging_size = 0;
+
+    std::vector<VkBufferImageCopy> copy_regions;
+    copy_regions.reserve(range.num_mip_levels);
+
+    for (uint32_t relative_mip = 0; relative_mip < range.num_mip_levels; ++relative_mip) {
+        const uint32_t mip = range.mip_levels + relative_mip;
+
+        const VkOffset3D offset {
+            .x = mip_offset(range.offset.x, relative_mip),
+            .y = mip_offset(range.offset.y, relative_mip),
+            .z = mip_offset(range.offset.z, relative_mip),
+        };
+
+        const VkExtent3D dimensions {
+            .width = mip_dimension(range.dimensions.x, relative_mip),
+            .height = mip_dimension(range.dimensions.y, relative_mip),
+            .depth = mip_dimension(range.dimensions.z, relative_mip),
+        };
+
+        const VkExtent3D mip_extent = image_mip_extent(mip);
+
+        Assert(static_cast<uint64_t>(offset.x) + dimensions.width <= mip_extent.width &&
+                static_cast<uint64_t>(offset.y) + dimensions.height <= mip_extent.height &&
+                static_cast<uint64_t>(offset.z) + dimensions.depth <= mip_extent.depth,
+            std::format("Texture region [{}, {}, {}] + [{} x {} x {}] exceeds mip {} extent [{} x {} x {}].",
+                offset.x, offset.y, offset.z, dimensions.width, dimensions.height, dimensions.depth,
+                mip, mip_extent.width, mip_extent.height, mip_extent.depth));
+
+        const uint32_t row_length = buffer_row_length == 0 ? 0 : mip_dimension(buffer_row_length, relative_mip);
+        Assert(row_length == 0 || row_length >= dimensions.width,
+            std::format("Buffer row length {} is smaller than mip {} copy width {}.", row_length, mip, dimensions.width));
+
+        const VkDeviceSize source_row_length = row_length == 0 ? dimensions.width : row_length;
+        const VkDeviceSize mip_size = source_row_length * dimensions.height * dimensions.depth * range.num_layers * bytes_per_pixel;
+
+        copy_regions.push_back(VkBufferImageCopy {
+            .bufferOffset = staging_size,
+            .bufferRowLength = row_length,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = GetFormatAspect(m_format),
+                .mipLevel = mip,
+                .baseArrayLayer = range.layer,
+                .layerCount = range.num_layers,
+            },
+            .imageOffset = offset,
+            .imageExtent = dimensions,
+        });
+
+        staging_size += mip_size;
+    }
+
+    auto staging_buffer = VulkanBuffer::BufferBuilder(m_device)
+        .AddUsage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+        .AddMemoryFlags(VMA_ALLOCATION_CREATE_MAPPED_BIT)
+        .AddMemoryFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT)
+        .Size(staging_size)
+        .Build();
+
+    std::memcpy(staging_buffer->Mapped(), data, static_cast<size_t>(staging_size));
+    staging_buffer->FlushMappedMemory(0, staging_size);
+
+    vkCmdCopyBufferToImage(cmd.Handle(), staging_buffer->Buffer(), m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        static_cast<uint32_t>(copy_regions.size()), copy_regions.data());
+
+    m_device.GetGarbageCollector().Enqueue(std::packaged_task<void()>([staging_buffer = std::move(staging_buffer)]() mutable {
+        staging_buffer.reset();
+    }));
+}
+
+void VulkanImage::Upload(TextureRange range, const void *data, uint32_t buffer_row_length) {
+    m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        Upload(cmd, range, data, buffer_row_length);
+    });
 }
 
 void VulkanImage::UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer) {

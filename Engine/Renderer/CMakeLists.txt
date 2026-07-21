@@ -1,7 +1,7 @@
 add_library(engine_renderer STATIC
     BindlessDescriptorTable.cpp
     DebugRenderer.cpp
-    GarbageCollector.cpp
+    ImGuiRenderer.cpp
     Renderer.cpp
     Renderer2D.cpp
 )

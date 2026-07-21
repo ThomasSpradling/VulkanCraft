@@ -32,6 +32,8 @@ VulkanDevice::VulkanDevice(const Window &window, DeviceConfig config)
     
     ChooseImageFormats();
 
+    m_garbage_collector = std::make_unique<GarbageCollector>(3);
+
     std::cout << "Created Vulkan Device.\n";    
 }
 
@@ -425,6 +427,7 @@ void VulkanDevice::CreateVulkanDevice() {
         .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,
 
         .descriptorBindingPartiallyBound = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,
         
         .scalarBlockLayout = VK_TRUE,

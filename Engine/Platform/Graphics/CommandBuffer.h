@@ -93,6 +93,8 @@ public:
     void BindPipeline(const VulkanPipeline &pipeline) const;
 
     void SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const;
+    void SetViewport(glm::vec2 offset, glm::vec2 extent) const;
+    void SetScissors(glm::ivec2 offset, glm::uvec2 extent) const;
 
     void CopyImage(const VulkanImage &src, const VulkanImage &dst) const;
 
@@ -116,7 +118,7 @@ public:
     //// Graphics Commands ////
 
     void BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset = 0) const;
-    void BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset = 0) const;
+    void BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset = 0, VkIndexType type = VK_INDEX_TYPE_UINT32) const;
 
     void Draw(uint32_t vertex_count, uint32_t instance_count = 1, uint32_t first_vertex = 0, uint32_t first_instance = 0) const;
     void DrawIndexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0) const;

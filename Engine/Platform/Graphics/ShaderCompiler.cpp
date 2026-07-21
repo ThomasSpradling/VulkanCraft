@@ -42,6 +42,13 @@ ShaderCompiler::ShaderCompiler(const std::filesystem::path &shader_search_path, 
                 .intValue0 = 1,
             }
         },
+        {
+            .name = slang::CompilerOptionName::DisableWarning,
+            .value = {
+                .kind = slang::CompilerOptionValueKind::String,
+                .stringValue0 = "41012", // profile-implicitly-upgraded
+            },
+        },
     };
 
     slang::SessionDesc session_desc = {

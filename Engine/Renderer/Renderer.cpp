@@ -3,7 +3,7 @@
 #include "AssetManager/GPUStructs.h"
 #include "AssetManager/Material.h"
 #include "Common.h"
-#include "GarbageCollector.h"
+#include "ImGuiRenderer.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/VulkanBuffer.h"
@@ -15,6 +15,7 @@
 #include <format>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <imgui.h>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -24,7 +25,7 @@
 #include "AssetManager/GLTFModel.h"
 #include "Core/ToString.h"
 
-Renderer::Renderer(const VulkanDevice &device, const Window &window)
+Renderer::Renderer(VulkanDevice &device, const Window &window)
     : m_device(device)
     , m_window(window)
 {
@@ -38,14 +39,14 @@ Renderer::Renderer(const VulkanDevice &device, const Window &window)
     std::filesystem::path path(ASSET_PATH "/shaders");
     m_shader_compiler = std::make_unique<ShaderCompiler>(path);
     m_bindless_table = std::make_unique<BindlessDescriptorTable>(m_device);
-    m_garbage_collector = std::make_unique<GarbageCollector>(MaxFramesInFlight);
 }
 
 Renderer::~Renderer() {
     std::cout << "Destroying Renderer\n";
 
-    m_garbage_collector->CollectAll();
+    m_device.GetGarbageCollector().CollectAll();
 
+    m_imgui_renderer.reset();
     DestroyObjects();
 
     m_bindless_table.reset();
@@ -54,6 +55,8 @@ Renderer::~Renderer() {
 
 void Renderer::Initialize() {
     CreateObjects();
+
+    m_imgui_renderer = std::make_unique<ImGuiRenderer>(*this);
 }
 
 void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions &options) {
@@ -61,7 +64,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     FrameContext &frame = m_frame_data[m_frame_index];
 
     frame.graphics_submit_fence->Wait();
-    m_garbage_collector->Collect(m_frame_index);
+    m_device.GetGarbageCollector().Collect(m_frame_index);
 
     auto image_index = m_swapchain->AcquireNextImage(nullptr, frame.image_available->Handle());
     if (!image_index) {
@@ -72,7 +75,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     frame.graphics_submit_fence->Reset();
     frame.command_pool->Reset();
 
-    m_garbage_collector->SetCurrentFrame(m_frame_index);
+    m_device.GetGarbageCollector().SetCurrentFrame(m_frame_index);
     
     SwapChainContext &swapchain_context = m_swapchain_data[*image_index];
     const VkExtent3D extent = m_swapchain->CurrentImage().Extent();
@@ -143,7 +146,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         data->point_light_count = point_light_count;
     }
 
-    //// Draw ////
+    //// Draw Scene ////
 
     CommandBuffer &cmd = *frame.command_buffer;
     VulkanImage &swapchain_image = m_swapchain->CurrentImage();
@@ -209,6 +212,20 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         }
     });
     cmd.EndRendering();
+
+    //// Draw ImGui ////
+
+    m_imgui_renderer->BeginFrame(context.draw_image->Extent());
+
+    ImGui::ShowDemoWindow();
+
+    m_imgui_renderer->EndFrame(cmd, {
+        .type = AttachmentType::Color,
+        .image = *context.draw_image,
+        .should_clear = false,
+    });
+    
+    //// Copy to Swap Chain ////
 
     cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
         cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

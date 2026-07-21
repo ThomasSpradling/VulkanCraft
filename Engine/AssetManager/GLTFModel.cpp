@@ -209,6 +209,7 @@ GLTFModel::GLTFModel(AssetManager &asset_manager, const std::filesystem::path &f
     std::string debug_name = scene.name.empty() ? file_path.filename().string() : scene.name;
     m_vertex_buffer = m_asset_manager.CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Storage,
+        .storage_type = StorageType::Device,
         .size = data.vertices.size() * sizeof(MeshVertex),
         .data = data.vertices.data(),
         .debug_name = std::format("GLTF Model ({}) Vertex Buffer", debug_name),
@@ -216,6 +217,7 @@ GLTFModel::GLTFModel(AssetManager &asset_manager, const std::filesystem::path &f
 
     m_index_buffer = m_asset_manager.CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Index,
+        .storage_type = StorageType::Device,
         .size = data.indices.size() * sizeof(uint32_t),
         .data = data.indices.data(),
         .debug_name = std::format("GLTF Model ({}) Index Buffer", debug_name),

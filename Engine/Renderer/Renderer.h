@@ -1,9 +1,10 @@
 #pragma once
 
 // #include "Camera.h"
+#include "AssetManager/AssetManager.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
-#include "GarbageCollector.h"
+#include "ImGuiRenderer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanSwapChain.h"
 #include "Platform/Window/Window.h"
@@ -53,7 +54,7 @@ struct SceneRenderOptions {
 
 class Renderer : public NonCopyable, public NonMovable {
 public:
-    Renderer(const VulkanDevice &device, const Window &window);
+    Renderer(VulkanDevice &device, const Window &window);
     ~Renderer();
 
     void Initialize();
@@ -75,8 +76,13 @@ public:
     void AttachAssetManager(AssetManager &manager) { m_asset_manager = &manager; }
     const VulkanDevice &Device() const { return m_device; }
 
+    uint32_t FrameIndex() const { return m_frame_index; }
+    uint32_t FramesInFlight() const { return MaxFramesInFlight; }
+
+    AssetManager &GetAssetManager() { Assert(m_asset_manager, "Must have asset manager!"); return *m_asset_manager; }
+    const Window &GetWindow() const { return m_window; }
     BindlessDescriptorTable &BindlessTable() { return *m_bindless_table; }
-    GarbageCollector &GPUGargbageCollector() { return *m_garbage_collector; }
+    const ShaderCompiler &GetShaderCompiler() const { return *m_shader_compiler; }
 private:
     struct FrameContext {
         std::unique_ptr<VulkanCommandPool> command_pool;
@@ -120,7 +126,7 @@ private:
     };
 private:
     static constexpr uint32_t MaxFramesInFlight = 3;
-    const VulkanDevice &m_device;
+    VulkanDevice &m_device;
     const Window &m_window;
 
     AssetManager *m_asset_manager = nullptr;
@@ -149,7 +155,7 @@ private:
     SpecializationConstantData m_specialization_constant;
 
     std::unique_ptr<BindlessDescriptorTable> m_bindless_table;
-    std::unique_ptr<GarbageCollector> m_garbage_collector;
+    std::unique_ptr<ImGuiRenderer> m_imgui_renderer;
 private:
     // void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
 

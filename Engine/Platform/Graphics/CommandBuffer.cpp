@@ -271,21 +271,27 @@ void CommandBuffer::BindPipeline(const VulkanPipeline &pipeline) const {
 }
 
 void CommandBuffer::SetViewportAndScissor(glm::ivec2 offset, glm::uvec2 extent) const {
-    VkViewport viewport {
-        .x = static_cast<float>(offset.x),
-        .y = static_cast<float>(offset.y),
-        .width = static_cast<float>(extent.x),
-        .height = static_cast<float>(extent.y),
+    SetViewport(offset, extent);
+    SetScissors(offset, extent);
+}
+
+void CommandBuffer::SetViewport(glm::vec2 offset, glm::vec2 extent) const {
+    const VkViewport viewport = {
+        .x = offset.x,
+        .y = offset.y + extent.y,
+        .width = extent.x,
+        .height = -extent.y,
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
+    vkCmdSetViewport(m_command_buffer, 0, 1, &viewport);
+}
 
+void CommandBuffer::SetScissors(glm::ivec2 offset, glm::uvec2 extent) const {
     VkRect2D scissor {
-        .offset = { .x = 0, .y = 0 },
+        .offset = { .x = offset.x, .y = offset.y },
         .extent = { .width = extent.x, .height = extent.y },
     };
-
-    vkCmdSetViewport(m_command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(m_command_buffer, 0, 1, &scissor);
 }
 
@@ -362,8 +368,8 @@ void CommandBuffer::BindVertexBuffer(VkBuffer buffer, VkDeviceSize offset) const
     vkCmdBindVertexBuffers(m_command_buffer, 0, 1, &buffer, &offset);
 }
 
-void CommandBuffer::BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset) const {
-    vkCmdBindIndexBuffer(m_command_buffer, buffer, offset, VK_INDEX_TYPE_UINT32);
+void CommandBuffer::BindIndexBuffer(VkBuffer buffer, VkDeviceSize offset, VkIndexType type) const {
+    vkCmdBindIndexBuffer(m_command_buffer, buffer, offset, type);
 }
 
 void CommandBuffer::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance) const {

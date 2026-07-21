@@ -12,18 +12,19 @@
 #include <sstream>
 #include <stb_image.h>
 
-AssetManager::AssetManager(const VulkanDevice &device, GarbageCollector &garbage_collector, BindlessDescriptorTable &descriptor_table)
+AssetManager::AssetManager(VulkanDevice &device, BindlessDescriptorTable &descriptor_table)
     : m_device(device)
     , m_bindless_table(descriptor_table)
-    , m_garbage_collector(garbage_collector)
 {
     m_pbr_material_buffer = CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Storage,
+        .storage_type = StorageType::Device,
         .size = sizeof(GPUMetallicRoughnessMaterial) * MaxPbrMaterials,
     });
 
     m_basic_material_buffer = CreateBuffer(GPUBufferData {
         .usage = BufferUsageBits::Storage,
+        .storage_type = StorageType::Device,
         .size = sizeof(GPUBasicMaterial) * MaxBasicMaterials,
     });
 
@@ -31,7 +32,7 @@ AssetManager::AssetManager(const VulkanDevice &device, GarbageCollector &garbage
     GPUBasicMaterial default_basic {};
 
     GetBuffer(m_pbr_material_buffer).UploadAt(&default_pbr, 0);
-    GetBuffer(m_pbr_material_buffer).UploadAt(&default_basic, 0);
+    GetBuffer(m_basic_material_buffer).UploadAt(&default_basic, 0);
 }
 
 AssetManager::~AssetManager() {
@@ -39,13 +40,6 @@ AssetManager::~AssetManager() {
     m_meshes.Clear();
     m_buffers.Clear();
 }
-
-// void AssetManager::RunDeferredTasks() {
-//     for (std::packaged_task<void()> &task : m_deferred_tasks) {
-//         task();
-//     }
-//     m_deferred_tasks.clear();
-// }
 
 GLTFHandle AssetManager::LoadGLTF(const std::filesystem::path &path) {
     auto current_model = std::make_unique<GLTFModel>(*this, path);
@@ -242,7 +236,7 @@ TextureHandle AssetManager::LoadTexture(const std::filesystem::path &path, Textu
     size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
 
     Texture texture {
-        .extent = glm::uvec2(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+        .extent = glm::uvec3(static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1),
         .format = format,
         .pixels = std::vector<std::byte>(byte_count),
         .generate_mipmaps = true,
@@ -267,8 +261,8 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
                 return VK_FORMAT_R16G16B16A16_SFLOAT;
             case TextureFormat::RGBA32Float:
                 return VK_FORMAT_R32G32B32A32_SFLOAT;
-            default:
             case TextureFormat::RGBA8:
+            default:
                 return VK_FORMAT_R8G8B8A8_UNORM;
         }
     };
@@ -378,7 +372,7 @@ const VulkanBuffer &AssetManager::GetBuffer(BufferHandle buffer) const {
 void AssetManager::DestroyBuffer(BufferHandle handle) {
     std::unique_ptr<VulkanBuffer> buffer = m_buffers.TakeOwnership(handle);
 
-    m_garbage_collector.Enqueue(std::packaged_task<void()>([buffer = std::move(buffer)]() mutable {
+    m_device.GetGarbageCollector().Enqueue(std::packaged_task<void()>([buffer = std::move(buffer)]() mutable {
         buffer.reset();
     }));
 }
@@ -399,7 +393,7 @@ TextureId AssetManager::GetTextureId(TextureHandle texture) {
 void AssetManager::DestroyTexture(TextureHandle handle) {
     TextureRecord image = m_textures.TakeOwnership(handle);
 
-    m_garbage_collector.Enqueue(std::packaged_task<void()>([this, image]() {
+    m_device.GetGarbageCollector().Enqueue(std::packaged_task<void()>([this, image]() {
         m_bindless_table.RemoveTexture(image.texture_id);
     }));
 }
@@ -414,7 +408,7 @@ SamplerId AssetManager::GetSamplerId(SamplerHandle sampler) {
 void AssetManager::DestroySampler(SamplerHandle handle) {
     SamplerRecord sampler = m_samplers.TakeOwnership(handle);
 
-    m_garbage_collector.Enqueue(std::packaged_task<void()>([this, sampler]() {
+    m_device.GetGarbageCollector().Enqueue(std::packaged_task<void()>([this, sampler]() {
         m_bindless_table.RemoveSampler(sampler.sampler_id);
     }));
 }

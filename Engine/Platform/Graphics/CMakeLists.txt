@@ -4,6 +4,7 @@ add_library(platform_graphics STATIC
     DescriptorAllocator.cpp
     DescriptorLayoutBuilder.cpp
     DescriptorWriter.cpp
+    GarbageCollector.cpp
     ShaderCompiler.cpp
     ShaderReflection.cpp
     VulkanObjects.cpp

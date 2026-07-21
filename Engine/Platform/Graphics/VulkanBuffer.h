@@ -62,20 +62,46 @@ public:
     // for now, one should NOT call this often!
     void Resize(VkDeviceSize size);
     void Upload(const void *data, VkDeviceSize bytes, VkDeviceSize offset = 0ull);
-    void *ReadData(VkDeviceSize bytes, VkDeviceSize offset = 0ull);
+    std::vector<std::byte> ReadData(VkDeviceSize bytes, VkDeviceSize offset = 0ull);
     
+    template<typename T>
+    std::vector<T> ReadDataArray(size_t count, VkDeviceSize offset = 0ull) {
+        static_assert(std::is_trivially_copyable_v<T>);
+
+        const auto byte_count = static_cast<VkDeviceSize>(sizeof(T) * count);
+        std::vector<std::byte> bytes = ReadData(byte_count, offset);
+        std::vector<T> result(count);
+
+        if (!bytes.empty()) {
+            std::memcpy(result.data(), bytes.data(), static_cast<std::size_t>(byte_count));
+        }
+
+        return result;
+    }
+
+    template<typename T>
+    T ReadData(VkDeviceSize offset = 0ull) {
+        static_assert(std::is_trivially_copyable_v<T>);
+
+        std::vector<std::byte> bytes = ReadData(sizeof(T), offset);
+
+        T result {};
+        std::memcpy(&result, bytes.data(), sizeof(T));
+        return result;
+    }
+
     // Upload data to index, viewing this buffer as an array<T>
-    template <typename T>
+    template<typename T>
     void UploadAt(const T *data, uint32_t index) {
         Upload(data, sizeof(T), sizeof(T) * index);
     }
 
-    template <typename T>
+    template<typename T>
     void Upload(const std::vector<T> &data, VkDeviceSize buffer_offset = 0) {
         Upload(data.data(), data.size() * sizeof(T), buffer_offset);
     }
     
-    template <typename T>
+    template<typename T>
     T *Mapped() {
         return static_cast<T *>(Mapped());
     }

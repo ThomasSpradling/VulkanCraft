@@ -35,7 +35,7 @@ glm::mat4 Transform::CalculateLocalMatrix() const {
 // ================ //
 glm::mat4 PerspectiveProjection::CalculateProjectionMatrix(float aspect) const {
     glm::mat4 matrix = glm::perspective(fov, aspect, near_plane, far_plane);
-    matrix[1][1] *= -1.0f;
+    // matrix[1][1] *= -1.0f;
     return matrix;
 }
 
@@ -43,7 +43,7 @@ glm::mat4 OrthographicProjection::CalculateProjectionMatrix(float aspect) const 
     float half_height = vertical_size / 2.0f;
     float half_width  = half_height * aspect;
     glm::mat4 matrix = glm::ortho(-half_width, half_width, -half_height, half_height, near_plane, far_plane);
-    matrix[1][1] *= -1.0f;
+    // matrix[1][1] *= -1.0f;
     return matrix;
 }
 

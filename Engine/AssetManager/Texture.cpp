@@ -2,7 +2,7 @@
 
 Texture Texture::Checkerboard(glm::uvec2 extent, uint32_t square_size, glm::u8vec4 color0, glm::u8vec4 color1, TextureFormat format) {
     Texture texture {
-        .extent = extent,
+        .extent = glm::uvec3(extent, 1.0f),
         .format = format,
         .generate_mipmaps = true,
     };

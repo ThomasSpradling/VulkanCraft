@@ -1,5 +1,6 @@
 #pragma once
 #include "Common.h"
+#include "Platform/Graphics/CommandBuffer.h"
 #include "VulkanDevice.h"
 #include <limits>
 #include <memory>
@@ -70,6 +71,15 @@ private:
     std::span<uint32_t> m_queue_families {};
 };
 
+struct TextureRange {
+    glm::ivec3 offset = {};
+    glm::uvec3 dimensions = {1, 1, 1};
+    uint32_t layer = 0;
+    uint32_t num_layers = 1;
+    uint32_t mip_levels = 0;
+    uint32_t num_mip_levels = 1;
+};
+
 class ImageBarrier;
 
 class VulkanImage {
@@ -108,6 +118,8 @@ public:
 
     VkImageUsageFlags Usage() const { return m_usage; }
 
+    void Upload(const CommandBuffer &cmd, TextureRange texture_range, const void *data, uint32_t buffer_row_length = 0);
+    void Upload(TextureRange texture_range, const void *data, uint32_t buffer_row_length = 0);
     void Upload(const void *data, VkDeviceSize bytes);
     void UploadLayer(const void *data, VkDeviceSize bytes, uint32_t layer);
 

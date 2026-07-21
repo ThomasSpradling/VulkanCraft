@@ -7,7 +7,7 @@ BindlessDescriptorTable::BindlessDescriptorTable(const VulkanDevice &device)
 {
     //// Descriptor Pool ////
     std::vector<DescriptorPoolRatios> ratios = {
-        { .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .ratio = MaxTextures },
+        { .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .ratio = MaxTextures + MaxCubeTextures },
         { .type = VK_DESCRIPTOR_TYPE_SAMPLER, .ratio = MaxSamplers },
         { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .ratio = MaxStorageImages },
         { .type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .ratio = MaxAccelerationStructures },
@@ -15,11 +15,18 @@ BindlessDescriptorTable::BindlessDescriptorTable(const VulkanDevice &device)
     m_descriptor_allocator = std::make_unique<DescriptorAllocator>(m_device, 1, ratios, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
 
     //// Descriptor Set Layout ////
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings {
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings {
         VkDescriptorSetLayoutBinding {
-            .binding = static_cast<uint32_t>(DescriptorBinding::Textures),
+            .binding = static_cast<uint32_t>(DescriptorBinding::Textures_2D),
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             .descriptorCount = MaxTextures,
+            .stageFlags = VK_SHADER_STAGE_ALL,
+            .pImmutableSamplers = nullptr,
+        },
+        VkDescriptorSetLayoutBinding {
+            .binding = static_cast<uint32_t>(DescriptorBinding::Textures_Cube),
+            .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .descriptorCount = MaxCubeTextures,
             .stageFlags = VK_SHADER_STAGE_ALL,
             .pImmutableSamplers = nullptr,
         },
@@ -52,8 +59,8 @@ BindlessDescriptorTable::BindlessDescriptorTable(const VulkanDevice &device)
     VkDescriptorBindingFlags acceleration_structure_flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
         | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
-
-    std::array<VkDescriptorBindingFlags, 4> binding_flags {
+    std::array<VkDescriptorBindingFlags, 5> binding_flags {
+        image_binding_flags,             // Textures
         image_binding_flags,             // Textures
         image_binding_flags,             // Samplers
         image_binding_flags,             // Storage images
@@ -207,7 +214,7 @@ VulkanImage &BindlessDescriptorTable::GetTexture(TextureId id) {
 }
 
 VkSampler BindlessDescriptorTable::GetSampler(SamplerId id) {
-    Assert(id < MaxTextures && m_textures[id], "Invalid sampler ID");
+    Assert(id < MaxSamplers && m_samplers[id], "Invalid sampler ID");
     return m_samplers[id];
 }
 
@@ -272,7 +279,7 @@ void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &imag
     VkWriteDescriptorSet write {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = m_global_descriptor_set,
-        .dstBinding = static_cast<uint32_t>(DescriptorBinding::Textures),
+        .dstBinding = static_cast<uint32_t>(DescriptorBinding::Textures_2D),
         .dstArrayElement = id,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,

@@ -10,4 +10,5 @@ target_link_libraries(platform_window PUBLIC
 
     glm
     glfw
+    imgui
 )

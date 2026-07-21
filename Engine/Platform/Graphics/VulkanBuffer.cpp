@@ -118,6 +118,8 @@ void *VulkanBuffer::Mapped() {
     Assert(m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT,
         "Cannot map memory of VulkanBuffer without VMA_ALLOCATION_CREATE_MAPPED_BIT set!");
 
+    Assert(m_is_coherent, "Currently does not support user mapping of non-coherent memory!");
+
     return m_allocation_info.pMappedData;
 }
 
@@ -201,7 +203,7 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
     });
 }
 
-void *VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
+std::vector<std::byte> VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
     Assert(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
     Assert(offset <= m_size || offset < 0, "Download offset is outside the buffer.");
     Assert(bytes <= m_size - offset, "Download exceeds buffer size.");
@@ -212,15 +214,15 @@ void *VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
 
     Assert((mapped & has_host_access) | accepts_transfer, "In order to download data, it must either be mapped or allow for transfers!");
 
+    std::vector<std::byte> result(bytes);
     if (mapped && has_host_access) {
         uint8_t *src = static_cast<uint8_t *>(m_allocation_info.pMappedData) + offset;
 
         if (!m_is_coherent)
             InvalidateMappedMemory(offset, bytes);
 
-        void *dst = nullptr;
-        std::memcpy(dst, src, bytes);
-        return dst;
+        std::memcpy(result.data(), src, bytes);
+        return result;
     }
 
     auto staging_buffer = VulkanBuffer::BufferBuilder(m_device)
@@ -239,5 +241,5 @@ void *VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
         vkCmdCopyBuffer(cmd.Handle(), m_buffer, staging_buffer->Buffer(), 1, &copy_region);
     });
 
-    return staging_buffer->ReadData(bytes, offset);
+    return staging_buffer->ReadData(bytes, 0);
 }

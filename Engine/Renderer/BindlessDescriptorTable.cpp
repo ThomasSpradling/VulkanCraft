@@ -160,6 +160,10 @@ BindlessDescriptorTable::~BindlessDescriptorTable() {
         texture.reset();
     }
 
+    for (auto &texture : m_cube_textures) {
+        texture.reset();
+    }
+
     for (auto sampler : m_samplers) {
         vkDestroySampler(m_device.Device(), sampler, nullptr);
     }
@@ -184,6 +188,13 @@ TextureId BindlessDescriptorTable::AddTexture(std::unique_ptr<VulkanImage> &imag
     TextureId id = m_texture_ids.Acquire();
     WriteTexture(id, *image);
     m_textures[id] = std::move(image);
+    return id;
+}
+
+TextureId BindlessDescriptorTable::AddTextureCube(std::unique_ptr<VulkanImage> &image) {
+    TextureId id = m_cube_texture_ids.Acquire();
+    WriteTextureCube(id, *image);
+    m_cube_textures[id] = std::move(image);
     return id;
 }
 
@@ -213,6 +224,11 @@ VulkanImage &BindlessDescriptorTable::GetTexture(TextureId id) {
     return *m_textures[id];
 }
 
+VulkanImage &BindlessDescriptorTable::GetTextureCube(TextureId id) {
+    Assert(id < MaxCubeTextures && m_cube_textures[id], "Invalid texture ID");
+    return *m_cube_textures[id];
+}
+
 VkSampler BindlessDescriptorTable::GetSampler(SamplerId id) {
     Assert(id < MaxSamplers && m_samplers[id], "Invalid sampler ID");
     return m_samplers[id];
@@ -235,6 +251,15 @@ void BindlessDescriptorTable::RemoveTexture(TextureId id) {
     WriteTexture(id, *m_textures[DefaultTextureId]);
     m_textures[id].reset();
     m_texture_ids.Release(id);
+}
+
+void BindlessDescriptorTable::RemoveTextureCube(TextureId id) {
+    Assert(id > DefaultCubeTextureId && id < MaxCubeTextures, "Invalid texture ID");
+    Assert(m_cube_textures[id], "Texture slot is empty");
+
+    WriteTextureCube(id, *m_cube_textures[DefaultTextureId]);
+    m_cube_textures[id].reset();
+    m_cube_texture_ids.Release(id);
 }
 
 void BindlessDescriptorTable::RemoveSampler(SamplerId id) {
@@ -268,7 +293,8 @@ void BindlessDescriptorTable::ReplaceSampler(SamplerId id, VkSampler sampler) {
 
 void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &image) {
     Assert(id < MaxTextures, "Invalid texture ID!");
-    Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
+    // Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
+    Assert((image.Usage() & VK_IMAGE_USAGE_SAMPLED_BIT) | (image.Usage() & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT), "Image usage must include either SAMPLED or INPUT_ATTACHMENT to write to descriptor set!");
     
     VkDescriptorImageInfo image_info {
         .sampler = VK_NULL_HANDLE,
@@ -280,6 +306,29 @@ void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &imag
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = m_global_descriptor_set,
         .dstBinding = static_cast<uint32_t>(DescriptorBinding::Textures_2D),
+        .dstArrayElement = id,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &image_info,
+    };
+
+    vkUpdateDescriptorSets(m_device.Device(), 1, &write, 0, nullptr);
+}
+
+void BindlessDescriptorTable::WriteTextureCube(TextureId id, const VulkanImage &image) {
+    Assert(id < MaxTextures, "Invalid texture ID!");
+    Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
+    
+    VkDescriptorImageInfo image_info {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = image.View(),
+        .imageLayout = image.Layout(),
+    };
+
+    VkWriteDescriptorSet write {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = m_global_descriptor_set,
+        .dstBinding = static_cast<uint32_t>(DescriptorBinding::Textures_Cube),
         .dstArrayElement = id,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,

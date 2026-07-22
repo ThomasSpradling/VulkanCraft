@@ -34,7 +34,8 @@ public:
     };
 
     struct TextureRecord {
-        TextureId texture_id;
+        TextureId texture_id = 0;
+        TextureId cube_texture_id = 0;
     };
 
     struct SamplerRecord {
@@ -44,7 +45,11 @@ public:
     AssetManager(VulkanDevice &device, BindlessDescriptorTable &descriptor_table);
     ~AssetManager();
     
-    TextureHandle LoadTexture(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb);
+    TextureId GetTextureId(TextureHandle texture);
+    TextureHandle LoadTexture2D(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb, bool generate_mipmaps = false);
+    TextureHandle LoadTextureCubeFromEquirectangular(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb);
+    TextureHandle LoadTextureCubeFromVerticalCross(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8Srgb);
+    TextureHandle LoadTextureCubeFromFaces(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8Srgb);
     
     GLTFHandle LoadGLTF(const std::filesystem::path &path);
     MeshHandle CreateMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices);
@@ -53,6 +58,7 @@ public:
     MaterialHandle CreateMaterial(const MetallicRoughnessMaterial &material);
     MaterialHandle CreateMaterial(const BasicMaterial &material);
 
+    SamplerId GetSamplerId(SamplerHandle sampler);
     SamplerHandle CreateSampler(const TextureSamplerData &sampler);
     TextureHandle CreateTexture(const Texture &texture);
 
@@ -98,6 +104,6 @@ private:
 
     BindlessDescriptorTable &m_bindless_table;
 private:
-    TextureId GetTextureId(TextureHandle texture);
-    SamplerId GetSamplerId(SamplerHandle sampler);
+    // Returns [extent, bitmap data]. May replace format with a fallback as needed.
+    std::pair<glm::uvec2, std::vector<std::byte>> LoadImageData(const std::filesystem::path &path, TextureFormat &format);
 };

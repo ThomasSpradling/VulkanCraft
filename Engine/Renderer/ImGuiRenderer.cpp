@@ -5,6 +5,7 @@
 #include "Renderer.h"
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
+#include <iostream>
 
 ImGuiRenderer::ImGuiRenderer(Renderer &renderer)
     : m_renderer(renderer)
@@ -75,18 +76,8 @@ void ImGuiRenderer::UpdateFont(float font_size_pixels) {
     io.FontDefault = font;
 }
 
-void ImGuiRenderer::BeginFrame(VkExtent3D extent) {
-    ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-
-    // VkFormat format = image_attachment.image.Format();
-    // Assert(format == m_renderer.Device().GetLinearColorFormat(), "Cannot begin drawing ImGui if formats don't match!");
-
+void ImGuiRenderer::BeginFrame() {
     ImGui_ImplGlfw_NewFrame();
-
-    // VkExtent3D extent = image_attachment.image.Extent();
-    // io.DisplaySize = ImVec2(io.DisplaySize.x * io.DisplayFramebufferScale.x, io.DisplaySize.y * io.DisplayFramebufferScale.y);
-
     ImGui::NewFrame();
 }
 
@@ -121,7 +112,7 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
                     }
 
                     TextureHandle texture = m_renderer.GetAssetManager().CreateTexture(Texture {
-                        .extent = glm::uvec2(tex->Width, tex->Height),
+                        .extent = glm::uvec3(tex->Width, tex->Height, 1),
                         .format = TextureFormat::RGBA8,
                         .pixels = std::move(pixels),
                     });
@@ -129,6 +120,7 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
                     m_textures.emplace(tex, texture);
 
                     const TextureId texture_id = m_renderer.GetAssetManager().GetTexture(texture).first;
+                    std::cout << "Creating new ImGUi texture: " << texture_id << "\n";
                     tex->SetTexID(texture_id);
                     tex->SetStatus(ImTextureStatus_OK);
                     continue;
@@ -153,7 +145,6 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
 
                     VulkanImage &texture = m_renderer.GetAssetManager().GetTexture(texture_it->second).second;
 
-                    // cmd.TransitionLayout(texture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
                     cmd.ImageMemoryBarrier(texture)
                         .SourceAccess(VK_ACCESS_2_SHADER_SAMPLED_READ_BIT)
                         .SourceStage(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT)
@@ -192,7 +183,6 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
         }
     }
 
-    cmd.BeginLabel("ImGui Rendering", glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
     cmd.BindDescriptorSet(0, *m_pipeline, m_renderer.BindlessTable().GlobalDescriptorSet());
     
     cmd.SetViewport(glm::vec2(0), glm::vec2(width, height));
@@ -304,23 +294,22 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
             };
 
             vkCmdSetScissor(cmd.Handle(), 0, 1, &scissor);
+            const uint64_t command_vertex_offset = static_cast<uint64_t>(vertex_offset) + static_cast<uint64_t>(draw_command.VtxOffset);
 
             ImGuiPushConstant push_constant {
                 .viewport_planes = { left, right, top, bottom },
-                .vertex_buffer = vertex_buffer.DeviceAddress(),
+                .vertex_buffer = vertex_buffer.DeviceAddress() + command_vertex_offset * sizeof(ImDrawVert),
                 .texture_id = static_cast<TextureId>(draw_command.GetTexID()),
                 .sampler_id = m_sampler,
             };
 
             cmd.PushConstants(m_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, push_constant);
             cmd.SetScissors(glm::ivec2(scissor_x, scissor_y), glm::uvec2(scissor_width, scissor_height));
-            cmd.DrawIndexed(draw_command.ElemCount, 1, index_offset + draw_command.IdxOffset, int32_t(vertex_offset + draw_command.VtxOffset));
+            cmd.DrawIndexed(draw_command.ElemCount, 1, index_offset + draw_command.IdxOffset);
         }
         index_offset += cmd_list->IdxBuffer.Size;
         vertex_offset += cmd_list->VtxBuffer.Size;
     }
 
     cmd.EndRendering();
-
-    cmd.EndLabel();
 }

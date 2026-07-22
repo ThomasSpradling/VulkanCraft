@@ -5,6 +5,7 @@ build
 Assets/models
 Assets/shaders/**/*.spv
 Assets/texts
+Assets/textures
 Assets/raw
 Assets/data/*.py
 

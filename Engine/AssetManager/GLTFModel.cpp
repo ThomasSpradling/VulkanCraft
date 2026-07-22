@@ -490,7 +490,7 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
             });
 
             Texture texture_data {
-                .extent = glm::uvec2(image.width, image.height),
+                .extent = glm::uvec3(image.width, image.height, 1),
                 .format = format,
                 .pixels = std::move(image_data),
                 .generate_mipmaps = true,

@@ -1,4 +1,6 @@
 #include "AssetManager.h"
+#include "AssetManager/Texture.h"
+#include "Bitmap.h"
 #include "Buffer.h"
 #include "Core/Handle.h"
 #include "Platform/Graphics/CommandBuffer.h"
@@ -8,9 +10,13 @@
 #include "GLTFModel.h"
 #include "Texture.h"
 
+#include "Utils.h"
+#include <functional>
 #include <future>
+#include <iostream>
 #include <sstream>
 #include <stb_image.h>
+#include <stdexcept>
 
 AssetManager::AssetManager(VulkanDevice &device, BindlessDescriptorTable &descriptor_table)
     : m_device(device)
@@ -221,34 +227,81 @@ std::pair<SamplerId, VkSampler> AssetManager::GetSampler(SamplerHandle sampler) 
     return std::make_pair(sampler_id, vulkan_sampler);
 }
 
-TextureHandle AssetManager::LoadTexture(const std::filesystem::path &path, TextureFormat format) {
-    if (format != TextureFormat::RGBA8 && format != TextureFormat::RGBA8Srgb)
-        throw std::runtime_error("STB texture loading only supports RGBA8 formats");
-
-    int width = 0;
-    int height = 0;
-    int channel_count = 0;
-
-    stbi_uc *loaded_pixels = stbi_load(path.string().c_str(), &width, &height, &channel_count, STBI_rgb_alpha);
-    if (loaded_pixels == nullptr)
-        throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
-
-    size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+TextureHandle AssetManager::LoadTexture2D(const std::filesystem::path &path, TextureFormat format, bool generate_mipmaps) {
+    auto [extent, data] = LoadImageData(path, format);
 
     Texture texture {
-        .extent = glm::uvec3(static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1),
+        .type = ImageType::Image2D,
+        .extent = glm::uvec3(extent, 1),
+        .layers = 1,
         .format = format,
-        .pixels = std::vector<std::byte>(byte_count),
-        .generate_mipmaps = true,
+        .pixels = std::move(data),
+        .generate_mipmaps = generate_mipmaps,
     };
-
-    std::memcpy(texture.pixels.data(), loaded_pixels, byte_count);
-    stbi_image_free(loaded_pixels);
 
     return CreateTexture(texture);
 }
 
+TextureHandle AssetManager::LoadTextureCubeFromEquirectangular(const std::filesystem::path &path, TextureFormat format) {
+    auto [extent, data] = LoadImageData(path, format);
+    
+    Assert((extent.x % 4) == 0 || extent.x / 2 == extent.y, "Invalid cube map!");
+    
+    const auto load_cube = [&]<typename Format, size_t ChannelCount>() -> TextureHandle {
+        using BitmapType = Bitmap<Format, ChannelCount>;
+
+        const auto expected_data_size = static_cast<size_t>(extent.x) * static_cast<size_t>(extent.y) * BitmapType::PixelBytes;
+        Assert(data.size() == expected_data_size, "Non-matching formats!");
+
+        BitmapType bitmap (std::move(data), extent.x, extent.y);
+        auto faces = ConvertEquirectangularToCubeMap(bitmap);
+
+        const uint32_t face_size = faces.front().Width();
+        size_t face_byte_size = static_cast<size_t>(face_size) * static_cast<size_t>(face_size) * BitmapType::PixelBytes;
+        
+        std::vector<std::byte> layered_data;
+        layered_data.reserve(face_byte_size * 6);
+
+        for (const BitmapType &face : faces) {
+            const std::vector<std::byte> &bytes = face.Data();
+            layered_data.insert(layered_data.end(), bytes.begin(), bytes.end());
+        }
+
+        Texture texture {
+            .type = ImageType::ImageCube,
+            .extent = glm::uvec3(face_size, face_size, 1),
+            .layers = 6,
+            .format = format,
+            .pixels = std::move(layered_data),
+            .generate_mipmaps = false,
+        };
+
+        return CreateTexture(texture);
+    };
+
+    switch (format) {
+        case TextureFormat::R8:
+            return load_cube.operator()<uint8_t, 1>();
+
+        case TextureFormat::RG8:
+            return load_cube.operator()<uint8_t, 2>();
+
+        case TextureFormat::RGBA8:
+        case TextureFormat::RGBA8Srgb:
+            return load_cube.operator()<uint8_t, 4>();
+
+        case TextureFormat::RGB32Float:
+            return load_cube.operator()<float, 3>();
+        case TextureFormat::RGBA32Float:
+            return load_cube.operator()<float, 4>();
+    }
+
+    return TextureHandle::Invalid();
+}
+
 TextureHandle AssetManager::CreateTexture(const Texture &texture) {
+    bool is_cube_map = false;
+
     const auto get_texture_format = [](TextureFormat format) -> VkFormat {
         switch (format) {
             case TextureFormat::R8:
@@ -257,8 +310,8 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
                 return VK_FORMAT_R8G8_UNORM;
             case TextureFormat::RGBA8Srgb:
                 return VK_FORMAT_R8G8B8A8_SRGB;
-            case TextureFormat::RGBA16Float:
-                return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case TextureFormat::RGB32Float:
+                return VK_FORMAT_R32G32B32_SFLOAT;
             case TextureFormat::RGBA32Float:
                 return VK_FORMAT_R32G32B32A32_SFLOAT;
             case TextureFormat::RGBA8:
@@ -267,17 +320,48 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
         }
     };
 
+    Assert(texture.layers > 0, "A texture must have at least one layer!");
+
     auto gpu_texture_builder = VulkanImage::ImageBuilder(m_device)
-        .Image2D(texture.extent.x, texture.extent.y)
         .Format(get_texture_format(texture.format))
         .AddUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
+    switch (texture.type) {
+        case ImageType::Image2D:
+            if (texture.layers == 1) {
+                gpu_texture_builder.Image2D(texture.extent.x, texture.extent.y);
+            } else {
+                gpu_texture_builder.Image2DArray(texture.extent.x, texture.extent.y, texture.layers);
+            }
+            break;
+        case ImageType::Image3D:
+            Assert(texture.layers == 1, "Currently we only support 3D textures with one layer.");
+            gpu_texture_builder.Image3D(texture.extent.x, texture.extent.y, texture.extent.z);
+            break;
+        case ImageType::ImageCube:
+            Assert(texture.layers % 6 == 0, "A cube map must have a multiple of six layers!");
+            Assert(texture.extent.x == texture.extent.y, "A cube map must have equal side lengths!");
+            is_cube_map = true;
+            if (texture.layers == 6) {
+                gpu_texture_builder.CubeMap(texture.extent.x);
+            } else {
+                gpu_texture_builder.CubeMapArray(texture.extent.x, texture.layers / 6);
+            }
+            break;
+    }
+
     if (texture.generate_mipmaps)
         gpu_texture_builder.MipMaps();
-
+    
     auto gpu_texture = gpu_texture_builder.Build();
     gpu_texture->TransitionLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    gpu_texture->Upload(texture.pixels.data(), sizeof(std::byte) * texture.pixels.size());
+    gpu_texture->Upload(TextureRange {
+        .dimensions = texture.extent,
+        .layer = 0,
+        .num_layers = texture.layers,
+        .mip_levels = 0,
+        .num_mip_levels = 1,
+    }, texture.pixels.data(), sizeof(std::byte) * texture.extent.x);
 
     m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
         if (texture.generate_mipmaps) {
@@ -290,10 +374,12 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
             .Execute();
     });
 
-    TextureId texture_id = m_bindless_table.AddTexture(gpu_texture);
-    TextureRecord record {
-        .texture_id = texture_id,
-    };
+    TextureRecord record {};
+    if (is_cube_map) {
+        record.cube_texture_id = m_bindless_table.AddTextureCube(gpu_texture);
+    } else {
+        record.texture_id = m_bindless_table.AddTexture(gpu_texture);
+    }
     return m_textures.Add(record);
 }
 
@@ -378,9 +464,18 @@ void AssetManager::DestroyBuffer(BufferHandle handle) {
 }
 
 std::pair<TextureId, std::reference_wrapper<VulkanImage>> AssetManager::GetTexture(TextureHandle texture) {
-    TextureId texture_id = m_textures.Get(texture).texture_id;
-    VulkanImage &image = m_bindless_table.GetTexture(texture_id);
-    return std::make_pair(texture_id, std::reference_wrapper(image));
+    Assert(texture != TextureHandle::Invalid(), "Must have valid texture handle!");
+
+    TextureRecord record = m_textures.Get(texture);
+    if (record.cube_texture_id != 0) {
+        VulkanImage &image = m_bindless_table.GetTextureCube(record.cube_texture_id);
+        return std::make_pair(record.cube_texture_id, std::reference_wrapper(image));
+    } else if (record.texture_id != 0) {
+        VulkanImage &image = m_bindless_table.GetTexture(record.texture_id);
+        return std::make_pair(record.texture_id, std::reference_wrapper(image));
+    }
+
+    throw std::runtime_error("Invalid texture!");
 }
 
 TextureId AssetManager::GetTextureId(TextureHandle texture) {
@@ -423,4 +518,86 @@ const VulkanBuffer &AssetManager::MaterialBuffer(MaterialType type) const {
     }
 
     std::unreachable();
+}
+
+std::pair<glm::uvec2, std::vector<std::byte>> AssetManager::LoadImageData(const std::filesystem::path &path, TextureFormat &format) {
+    bool is_floating_point = false;
+    int desired_channels = 0;
+    uint32_t channel_size = 0;
+    switch (format) {
+        case TextureFormat::R8: {
+            desired_channels = 1;
+            channel_size = 1;
+            break;
+        }
+        case TextureFormat::RG8: {
+            desired_channels = 2;
+            channel_size = 1;
+            break;
+        }
+        case TextureFormat::RGBA8: {
+            desired_channels = 4;
+            channel_size = 1;
+            break;
+        }
+        case TextureFormat::RGBA8Srgb: {
+            desired_channels = 4;
+            channel_size = 1;
+            break;
+        }
+        case TextureFormat::RGB32Float: {
+            is_floating_point = true;
+            desired_channels = 3;
+            channel_size = 4;
+            break;
+        }
+        case TextureFormat::RGBA32Float: {
+            is_floating_point = true;
+            desired_channels = 4;
+            channel_size = 4;
+            break;
+        }
+    }
+
+    int width = 0;
+    int height = 0;
+    int channel_count = 0;
+
+    std::vector<std::byte> result {};
+    
+    if (is_floating_point) {
+        float *data = stbi_loadf(path.string().c_str(), &width, &height, &channel_count, desired_channels);
+        if (data == nullptr || width == 0 || height == 0 || channel_count == 0)
+            throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
+
+        Assert(channel_count == desired_channels, "We currently only support floating point images with 4 channels");
+
+        size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * channel_count * channel_size;
+        result.resize(byte_count);
+        std::memcpy(result.data(), data, byte_count);
+
+        stbi_image_free(data);
+    } else {
+        unsigned char *data = stbi_load(path.string().c_str(), &width, &height, &channel_count, STBI_rgb_alpha);
+        if (data == nullptr || width == 0 || height == 0 || channel_count == 0)
+            throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
+
+        if (channel_count != desired_channels) {
+            std::cerr << "Warning: Cannot get desired channel count for texture " << path.string() << ". Falling back.\n";
+            if (channel_count == 1)
+                format = TextureFormat::R8;
+            if (channel_count == 2)
+                format = TextureFormat::RG8;
+            if (channel_count == 4)
+                format = TextureFormat::RGBA8;
+        }
+
+        size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * channel_count * channel_size;
+        result.resize(byte_count);
+        std::memcpy(result.data(), data, byte_count);
+
+        stbi_image_free(data);
+    }
+
+    return std::make_pair(glm::uvec2(width, height), result);
 }

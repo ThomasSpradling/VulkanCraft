@@ -12,7 +12,7 @@ public:
     ImGuiRenderer(Renderer &renderer);
     ~ImGuiRenderer();
 
-    void BeginFrame(VkExtent3D extent);
+    void BeginFrame();
     void EndFrame(const CommandBuffer &cmd, const ImageAttachment &image_attachment);
 private:
     Renderer &m_renderer;

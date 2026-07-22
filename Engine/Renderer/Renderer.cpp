@@ -9,6 +9,7 @@
 #include "Platform/Graphics/VulkanBuffer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanImage.h"
+#include "Platform/Graphics/VulkanPipeline.h"
 #include "World/DefaultComponents.h"
 #include <chrono>
 #include <filesystem>
@@ -98,7 +99,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
         data->view = view_matrix;
         data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-        data->ambient = 0.1f;
+        data->ambient = m_environment_settings.ambient_color * m_environment_settings.ambient_intensity;
         data->light_data = light_data.DeviceAddress();
     }
 
@@ -157,8 +158,6 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     cmd.Begin();
     cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
 
-    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
-
     cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
 
@@ -171,9 +170,57 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     });
     attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
 
-    cmd.BindPipeline(*m_triangle_pipeline);
-    cmd.BeginRendering(attachments);
+    //// Draw Cube Map ////
+    TextureId envmap_id = m_asset_manager->GetTexture(m_environment_map).first;
 
+    cmd.BeginLabel("Sky Box", glm::vec4(1.0f, 1.0f, 0.8f, 1.0f));
+    cmd.BindDescriptorSet(0, *m_skybox_pipeline, m_bindless_table->GlobalDescriptorSet());
+    cmd.BindPipeline(*m_skybox_pipeline);
+    cmd.BeginRendering({
+        ImageAttachment {
+            .type = AttachmentType::Color,
+            .image = *context.draw_image,
+            .should_clear = true,
+            .clear_color = clear_color,
+        },
+        ImageAttachment {
+            .type = AttachmentType::Depth,
+            .image = *context.depth_buffer,
+            .should_clear = true,
+        }
+    });
+        const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
+        glm::vec3 camera_translation = view_matrix[3];
+        glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
+
+        cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
+            .model = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f)),
+            .view = camera_transform,
+            .projection = projection_matrix,
+            .vertex_buffer = mesh.VertexBuffer().DeviceAddress(),
+            .cube_map_id = envmap_id,
+        });
+        cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
+        cmd.DrawIndexed(mesh.IndexCount());
+    cmd.EndRendering();
+    cmd.EndLabel();
+
+    cmd.BeginLabel("Draw Scene");
+    cmd.BindPipeline(*m_triangle_pipeline);
+    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
+    cmd.BeginRendering({
+        ImageAttachment {
+            .type = AttachmentType::Color,
+            .image = *context.draw_image,
+            .should_clear = false,
+            .clear_color = clear_color,
+        },
+        ImageAttachment {
+            .type = AttachmentType::Depth,
+            .image = *context.depth_buffer,
+            .should_clear = false,
+        }
+    });
     m_push_constant.material_buffer = m_asset_manager->MaterialBuffer().DeviceAddress();
     world.Each<ProceduralMeshComponent>([&](Entity entity, ProceduralMeshComponent &component) {
         if (!component.visible)
@@ -187,6 +234,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
 
         m_push_constant.model = world.GlobalMatrix(entity);
         m_push_constant.material_id = material.material_index;
+        m_push_constant.envmap_id = envmap_id;
 
         cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
         cmd.DrawIndexed(mesh.IndexCount());
@@ -212,18 +260,31 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         }
     });
     cmd.EndRendering();
+    cmd.EndLabel();
 
     //// Draw ImGui ////
 
-    m_imgui_renderer->BeginFrame(context.draw_image->Extent());
+    cmd.BeginLabel("Render ImGui");
+    m_imgui_renderer->BeginFrame();
 
-    ImGui::ShowDemoWindow();
+    m_render_ui();
+
+
+
+    // ImGui::ShowDemoWindow();
+
+    // // auto [texture_id, texture] = m_asset_manager->GetTexture(m_environment_map);
+    // // float width = static_cast<float>(texture.get().Extent().width);
+    // // float height = static_cast<float>(texture.get().Extent().height);
+    // VulkanImage &image = m_bindless_table->GetTexture(1);
+    // ImGui::Image(ImTextureRef(ImTextureID(1)), ImVec2(static_cast<float>(image.Extent().width), static_cast<float>(image.Extent().height)));
 
     m_imgui_renderer->EndFrame(cmd, {
         .type = AttachmentType::Color,
         .image = *context.draw_image,
         .should_clear = false,
     });
+    cmd.EndLabel();
     
     //// Copy to Swap Chain ////
 
@@ -306,10 +367,16 @@ void Renderer::CreateObjects() {
         });
     }
 
+    m_skybox = m_asset_manager->CreateMesh(Shape::Cube(2.0f));
+    m_environment_map = m_asset_manager->LoadTextureCubeFromEquirectangular(ASSET_PATH "/textures/cowboy_town_saloon_4k.hdr", TextureFormat::RGB32Float);
+
     CreateLights();
 
     m_triangle_shader = m_shader_compiler->Compile("GLTF/GLTFModel");
     Assert(m_triangle_shader, "Failed to compile shader!");
+    
+    m_skybox_shader = m_shader_compiler->Compile("SkyBox/SkyBox");
+    Assert(m_skybox_shader, "Failed to compile shader!");
 
     CreateTrianglePipeline();
     CreateSwapChainObjects();
@@ -344,6 +411,7 @@ void Renderer::CreateSwapChainObjects() {
             .Format(m_device.GetDepthOnlyFormat())
             .AddUsage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
             .Build();
+        context.depth_buffer->SetDebugName(std::format("Depth Image [{}]", i));
     }
 }
 
@@ -352,58 +420,86 @@ void Renderer::DestroySwapChainObjects() {
 }
 
 void Renderer::CreateTrianglePipeline() {
-    VkPushConstantRange range {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset = 0,
-        .size = sizeof(PushConstantData),
-    };
-
-    VkSpecializationMapEntry entry_is_wireframe {
-        .constantID = 0,
-        .offset = offsetof(SpecializationConstantData, is_wireframe),
-        .size = sizeof(m_specialization_constant.is_wireframe)
-    };
-
-    VkSpecializationInfo specialization_info {
-        .mapEntryCount = 1,
-        .pMapEntries = &entry_is_wireframe,
-        .dataSize = sizeof(SpecializationConstantData),
-        .pData = &m_specialization_constant,
-    };
-
-    Assert(m_triangle_shader, "Triangle shader was not compiled!");
-
-    auto builder = VulkanPipeline::GraphicsBuilder(m_device)
-        .VertexShader(*m_triangle_shader, "main_vert")
-        .FragmentShader(*m_triangle_shader, "main_frag")
-        
-        .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-        .SetPolygonMode(VK_POLYGON_MODE_FILL)
-        .EnableCulling()
-
-        .EnableDepthTest()
-        .AddColorAttachment({
-            .format = m_device.GetLinearColorFormat(),
-            .blending_mode = BlendMode::Disabled,
-        })
-        .SetDepthAttachmentFormat(m_device.GetDepthOnlyFormat())
-        .AddPushConstant(range)
-        .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
-        .SetSpecializationConstants(specialization_info);
-
-    if (m_triangle_pipeline)
-        builder.FromBase(m_triangle_pipeline->Pipeline());
-
-    m_specialization_constant.is_wireframe = false;
-    m_triangle_pipeline = builder.Build();
-
-    builder.SetPolygonMode(VK_POLYGON_MODE_LINE)
-        .SetDepthBias(-1.0f, 0.0f, -1.0f);
+    // Triangle Pipeline
+    {
+        VkPushConstantRange range {
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .offset = 0,
+            .size = sizeof(PushConstantData),
+        };
     
-    m_specialization_constant.is_wireframe = true;
-    m_wireframe_pipeline = builder.Build();
+        VkSpecializationMapEntry entry_is_wireframe {
+            .constantID = 0,
+            .offset = offsetof(SpecializationConstantData, is_wireframe),
+            .size = sizeof(m_specialization_constant.is_wireframe)
+        };
+    
+        VkSpecializationInfo specialization_info {
+            .mapEntryCount = 1,
+            .pMapEntries = &entry_is_wireframe,
+            .dataSize = sizeof(SpecializationConstantData),
+            .pData = &m_specialization_constant,
+        };
+    
+        Assert(m_triangle_shader, "Triangle shader was not compiled!");
+    
+        auto builder = VulkanPipeline::GraphicsBuilder(m_device)
+            .VertexShader(*m_triangle_shader, "main_vert")
+            .FragmentShader(*m_triangle_shader, "main_frag")
+            
+            .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+            .SetPolygonMode(VK_POLYGON_MODE_FILL)
+            .EnableCulling()
+    
+            .EnableDepthTest()
+            .AddColorAttachment({
+                .format = m_device.GetLinearColorFormat(),
+                .blending_mode = BlendMode::Disabled,
+            })
+            .SetDepthAttachmentFormat(m_device.GetDepthOnlyFormat())
+            .AddPushConstant(range)
+            .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
+            .SetSpecializationConstants(specialization_info);
+    
+        if (m_triangle_pipeline)
+            builder.FromBase(m_triangle_pipeline->Pipeline());
+    
+        m_specialization_constant.is_wireframe = false;
+        m_triangle_pipeline = builder.Build();
+    
+        builder.SetPolygonMode(VK_POLYGON_MODE_LINE)
+            .SetDepthBias(-1.0f, 0.0f, -1.0f);
+    
+        m_specialization_constant.is_wireframe = true;
+        m_wireframe_pipeline = builder.Build();
+    
+        m_triangle_pipeline->SetDebugName("Triangle Pipeline");
+    }
 
-    m_triangle_pipeline->SetDebugName("Triangle Pipeline");
+    // Skybox Pipeline
+    {
+        VkPushConstantRange range {
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .offset = 0,
+            .size = sizeof(SkyboxPushConstants),
+        };
+
+        m_skybox_pipeline = VulkanPipeline::GraphicsBuilder(m_device)
+            .VertexShader(*m_skybox_shader, "main_vert")
+            .FragmentShader(*m_skybox_shader, "main_frag")
+            .AddColorAttachment(ColorAttachment {
+                .format = m_device.GetLinearColorFormat(),
+                .blending_mode = BlendMode::Disabled,
+            })
+            .SetDepthAttachmentFormat(m_device.GetDepthOnlyFormat())
+            .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+            .SetPolygonMode(VK_POLYGON_MODE_FILL)
+            .EnableDepthTest()
+            .AddPushConstant(range)
+            .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
+            .Build();
+        m_skybox_pipeline->SetDebugName("SkyBox Pipeline");
+    }
 }
 
 void Renderer::DestroyTrianglePipeline() {

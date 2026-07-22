@@ -37,16 +37,19 @@ public:
     
     // Note: Anything added here takes ownership away from caller
     TextureId AddTexture(std::unique_ptr<VulkanImage> &image);
+    TextureId AddTextureCube(std::unique_ptr<VulkanImage> &image);
     SamplerId AddSampler(VkSampler sampler);
     StorageImageId AddStorageImage(std::unique_ptr<VulkanImage> &image);
     AccelerationStructureId AddAccelerationStructure(VkAccelerationStructureKHR acceleration_structure);
 
     VulkanImage &GetTexture(TextureId id);
+    VulkanImage &GetTextureCube(TextureId id);
     VkSampler GetSampler(SamplerId id);
     VulkanImage &GetStorageImage(StorageImageId id);
     VkAccelerationStructureKHR GetAccelerationStructure(AccelerationStructureId id);
 
     void RemoveTexture(TextureId id);
+    void RemoveTextureCube(TextureId id);
     void RemoveSampler(SamplerId id);
 
     void ReplaceTexture(TextureId id, std::unique_ptr<VulkanImage> image);
@@ -67,11 +70,13 @@ private:
     IndexFreeList<MaxAccelerationStructures> m_acceleration_structure_ids;
 
     std::array<std::unique_ptr<VulkanImage>, MaxTextures> m_textures {};
+    std::array<std::unique_ptr<VulkanImage>, MaxCubeTextures> m_cube_textures {};
     std::array<VkSampler, MaxSamplers> m_samplers {};
     std::array<std::unique_ptr<VulkanImage>, MaxStorageImages> m_storage_images {};
     std::array<VkAccelerationStructureKHR, MaxAccelerationStructures> m_acceleration_structures {};
 private:
     void WriteTexture(TextureId id, const VulkanImage &image);
+    void WriteTextureCube(TextureId id, const VulkanImage &image);
     void WriteSampler(SamplerId id, VkSampler sampler);
     void WriteStorageImage(StorageImageId id, const VulkanImage &image);
     void WriteAccelerationStructure(AccelerationStructureId id, VkAccelerationStructureKHR acceleration_structure);

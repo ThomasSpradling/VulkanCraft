@@ -43,6 +43,7 @@ struct PushConstantData {
     ImmutablePtr<GLTFMaterial> materials;
 
     uint material_id;
+    uint envmap_id;
 }
 [[vk::push_constant]] ConstantBuffer<PushConstantData> g_push_constant;
 
@@ -160,7 +161,7 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     float3 view_dir = normalize(scene->eye_position.xyz - frag.world_position.xyz);
 
     float3 color = emissive;
-    float3 ambient = surface_color.rgb * scene->ambient;
+    float3 ambient = surface_color.rgb * scene->ambient.rgb;
     color += ambient;
     
     color += ContributeDirectionalLight(directional_light, surface_color.rgb, shading_normal, metallic, roughness, view_dir);
@@ -169,6 +170,11 @@ float4 main_frag(VertexOutput frag) : SV_Target {
     for (uint i = 0; i < point_light_count; ++i) {
         color += ContributePointLight(point_lights[i], surface_color.rgb, frag.world_position.xyz, shading_normal, metallic, roughness, view_dir);
     }
+
+    float3 reflect_dir = reflect(-view_dir, shading_normal);
+    float4 env_color = SampleTextureCube(g_push_constant.envmap_id, 0, reflect_dir);
+    // float3 env_brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, reflect_dir, view_dir);
+    // color += env_color.rgb * env_brdf * max(dot(shading_normal, reflect_dir), 0.0f);
     
-    return float4(color.rgb, surface_color.a);
+    return float4(env_color.rgb, surface_color.a);
 }

@@ -11,6 +11,10 @@ public:
         : m_index(index)
         , m_generation(generation) 
     {}
+    Handle(uint64_t value)
+        : m_index(static_cast<uint32_t>(value >> 32))
+        , m_generation(static_cast<uint32_t>(value))
+    {}
 
     static constexpr Handle Invalid() {
         Handle handle;
@@ -22,6 +26,14 @@ public:
     bool constexpr IsValid() const {
         Handle invalid = Handle::Invalid();
         return invalid.m_index != m_index && invalid.m_generation != m_generation;
+    }
+
+    uint64_t constexpr ToInt() const {
+        return (static_cast<uint64_t>(m_index) << 32) | static_cast<uint64_t>(m_generation);
+    };
+
+    explicit constexpr operator uint64_t() const {
+        return ToInt();
     }
 
     explicit constexpr operator bool() const { return IsValid(); }

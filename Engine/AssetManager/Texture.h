@@ -10,12 +10,20 @@ enum class TextureFormat : uint8_t {
     RG8,
     RGBA8,
     RGBA8Srgb,
-    RGBA16Float,
+    RGB32Float,
     RGBA32Float,
 };
 
+enum class ImageType : uint8_t {
+    Image2D,
+    Image3D,
+    ImageCube,
+};
+
 struct Texture {
-    glm::uvec2 extent {};
+    ImageType type = ImageType::Image2D;
+    glm::uvec3 extent {};
+    uint32_t layers = 1;
     TextureFormat format = TextureFormat::RGBA8;
     std::vector<std::byte> pixels;
     bool generate_mipmaps = false;

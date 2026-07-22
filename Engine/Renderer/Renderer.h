@@ -2,6 +2,7 @@
 
 // #include "Camera.h"
 #include "AssetManager/AssetManager.h"
+#include "AssetManager/Mesh.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
 #include "ImGuiRenderer.h"
@@ -10,6 +11,7 @@
 #include "Platform/Window/Window.h"
 #include "Platform/Graphics/ShaderCompiler.h"
 #include "Platform/Graphics/VulkanPipeline.h"
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
@@ -42,7 +44,7 @@ struct RendererCapabilities {
 
 struct EnvironmentSettings {
     glm::vec4 ambient_color = glm::vec4(1.0f);
-    float ambient_intensity = 0.2f;
+    float ambient_intensity = 0.0f;
 
     TextureHandle environment_map = TextureHandle::Invalid();
     float environment_rotation = 0.0f;
@@ -66,8 +68,8 @@ public:
     void SetClearColor(const glm::vec4 &color);
     glm::vec4 ClearColor() const;
 
-    void SetEnvironment(const EnvironmentSettings &settings);
-    EnvironmentSettings Environment() const;
+    void SetEnvironment(const EnvironmentSettings &settings) { m_environment_settings = settings; }
+    EnvironmentSettings Environment() const { return m_environment_settings; };
 
     void EnableVSync();
     void DisableVSync();
@@ -78,6 +80,8 @@ public:
 
     uint32_t FrameIndex() const { return m_frame_index; }
     uint32_t FramesInFlight() const { return MaxFramesInFlight; }
+
+    void RenderUI(const std::function<void(void)> &render_ui) {  m_render_ui = render_ui; }
 
     AssetManager &GetAssetManager() { Assert(m_asset_manager, "Must have asset manager!"); return *m_asset_manager; }
     const Window &GetWindow() const { return m_window; }
@@ -109,7 +113,7 @@ private:
         glm::mat4 view;
         glm::vec4 sun_direction; // w = power
         glm::vec4 eye_position;
-        float ambient;
+        glm::vec4 ambient;
         VkDeviceAddress light_data;
     };  
 
@@ -119,6 +123,15 @@ private:
         VkDeviceAddress scene_data_buffer;
         VkDeviceAddress material_buffer;
         uint32_t material_id = 0;
+        uint32_t envmap_id = 0;
+    };
+
+    struct SkyboxPushConstants {
+        glm::mat4 model;
+        glm::mat4 view;
+        glm::mat4 projection;
+        VkDeviceAddress vertex_buffer;
+        TextureId cube_map_id = 0;
     };
 
     struct SpecializationConstantData {
@@ -133,6 +146,7 @@ private:
     
     // Settings
     bool m_enable_vsync = false;
+    EnvironmentSettings m_environment_settings {};
 
     // GPU Context
     std::unique_ptr<VulkanSwapChain> m_swapchain = nullptr;
@@ -148,14 +162,21 @@ private:
     std::unique_ptr<VulkanPipeline> m_triangle_pipeline;
     std::unique_ptr<VulkanPipeline> m_debug_pipeline;
     std::unique_ptr<VulkanPipeline> m_wireframe_pipeline;
+    std::unique_ptr<VulkanPipeline> m_skybox_pipeline;
 
     std::optional<CompiledShader> m_triangle_shader;
+    std::optional<CompiledShader> m_skybox_shader;
 
     PushConstantData m_push_constant;
     SpecializationConstantData m_specialization_constant;
 
     std::unique_ptr<BindlessDescriptorTable> m_bindless_table;
     std::unique_ptr<ImGuiRenderer> m_imgui_renderer;
+
+    MeshHandle m_skybox = MeshHandle::Invalid();
+    TextureHandle m_environment_map = TextureHandle::Invalid();
+
+    std::function<void(void)> m_render_ui;
 private:
     // void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
 

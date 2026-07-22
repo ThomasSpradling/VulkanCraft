@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <imgui.h>
 #include <iostream>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -22,7 +23,7 @@ void SimpleGame::Initialize(ClientContext &context) {
     // MaterialHandle gray_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
     //     .base_color_factor = glm::vec4(0.0f, 0.5f, 0.3f, 1.0f),
     //     .metallic_factor = 0.0f,
-    //     .roughness_factor = 0.4f,
+    //     .roughness_factor = 1.0f,
     // });
     // MeshHandle torus_mesh = context.assets.CreateMesh(Shape::UVShape(
     //     64,
@@ -72,22 +73,40 @@ void SimpleGame::Initialize(ClientContext &context) {
         .intensity = 4.0f,
     });
 
+    MeshHandle sphere = context.assets.CreateMesh(Shape::UVSphere());
+
     Entity fill_light = context.world.CreateEntity("Fill Light", Transform {
         .translation = glm::vec3(-2.0f, 0.5f, 2.0f),
+        .scale = glm::vec3(0.1f),
+    });
+    MaterialHandle fill_light_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
+        .emissive_factor = glm::vec3(0.65f, 0.75f, 1.0f),
     });
     context.world.Add<PointLight>(fill_light, PointLight {
         .color = glm::vec4(0.65f, 0.75f, 1.0f, 1.0f),
         .intensity = 12.0f,
         .range = 8.0f,
     });
+    context.world.Add<ProceduralMeshComponent>(fill_light, ProceduralMeshComponent {
+        .mesh = sphere,
+        .material = fill_light_material,
+    });
 
     Entity rim_light = context.world.CreateEntity("Rim Light", Transform {
         .translation = glm::vec3(1.5f, 1.0f, -2.0f),
+        .scale = glm::vec3(0.2f),
+    });
+    MaterialHandle rim_light_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
+        .emissive_factor = glm::vec3(1.0f, 0.75f, 0.55f),
     });
     context.world.Add<PointLight>(rim_light, PointLight {
         .color = glm::vec4(1.0f, 0.75f, 0.55f, 1.0f),
         .intensity = 18.0f,
         .range = 8.0f,
+    });
+    context.world.Add<ProceduralMeshComponent>(rim_light, ProceduralMeshComponent {
+        .mesh = sphere,
+        .material = rim_light_material,
     });
 
     // GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
@@ -123,6 +142,19 @@ void SimpleGame::Initialize(ClientContext &context) {
     //     .color = glm::vec4(1.0f),
     //     .intensity = 10.0f,
     // });
+
+    TextureHandle wood = context.assets.LoadTexture2D(ASSET_PATH "/textures/example.png");
+    auto [texture_id, texture] = context.assets.GetTexture(wood);
+    // float width = static_cast<float>(texture.get().Extent().width);
+    // float height = static_cast<float>(texture.get().Extent().height);
+
+    // std::cout << "TEXTURE: " << texture_id << "\n";
+
+    context.renderer.RenderUI([texture_id]() {
+        // std::cout << "Rendering with texture: " << texture_id << "\n";
+        ImGui::Image(texture_id, ImVec2(200.0f, 200.0f));
+        ImGui::ShowDemoWindow();
+    });
 }
 
 void SimpleGame::CreatePlayer(ClientContext &context) {

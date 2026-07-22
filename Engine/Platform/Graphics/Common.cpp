@@ -225,7 +225,7 @@ VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType acc
             return result;
         }
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: {
-            std::cerr << "Warning: It is likely better to manually specify how an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed.\n";
+            // std::cerr << "Warning: It is likely better to manually specify how an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed.\n";
             return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT;
         }
         case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: {
@@ -263,16 +263,16 @@ VkPipelineStageFlags2 InferPipelineStageFlags(VkImageLayout image_layout) {
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
             return VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: {
-            std::cerr << "Warning: It is likely better to manually specify which pipeline stage an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed in.\n";
+            // std::cerr << "Warning: It is likely better to manually specify which pipeline stage an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed in.\n";
             return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
-                VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT |
-                VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+                // VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT |
+                // VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT |
+                // VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT |
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                // VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                // VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                // VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT |
+                // VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
         }
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
             return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;

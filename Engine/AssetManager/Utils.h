@@ -10,28 +10,6 @@ template<typename Format, size_t ChannelCount>
 std::vector<Bitmap<Format, ChannelCount>> ConvertEquirectangularToCubeMap(const Bitmap<Format, ChannelCount> &bitmap) {
     using Pixel = typename Bitmap<Format, ChannelCount>::Pixel;
 
-    // using Clock = std::chrono::steady_clock;
-    // Pixel accumulator {};
-    // auto start = Clock::now();
-
-    // for (uint32_t repeat = 0; repeat < 4; ++repeat) {
-    //     for (uint32_t y = 0; y < bitmap.Height(); ++y) {
-    //         for (uint32_t x = 0; x < bitmap.Width(); ++x) {
-    //             bitmap.GetPixel(x, y);
-    //         }
-    //     }
-    // }
-
-    // auto end = Clock::now();
-
-    // std::cerr
-    //     << "Read test: "
-    //     << std::chrono::duration<double>(end - start).count()
-    //     << " seconds\n";
-
-    // Prevent the optimizer from removing the loop.
-    // std::cerr << static_cast<double>(accumulator[0]) << '\n';
-
     if (bitmap.Width() == 0 || bitmap.Height() == 0 || bitmap.Width() % 4 != 0 || bitmap.Width() / 2 != bitmap.Height()) {
         throw std::runtime_error("Expected a 2:1 equirectangular bitmap with a width divisible by four");
     }
@@ -102,7 +80,6 @@ std::vector<Bitmap<Format, ChannelCount>> ConvertEquirectangularToCubeMap(const 
     for (uint32_t face = 0; face < 6; ++face) {
         for (uint32_t y = 0; y < face_size; ++y) {
             for (uint32_t x = 0; x < face_size; ++x) {
-                // std::cout << "Face: " << face << "Pixel: " << x << ", " << y << ".\n";
                 float s = (static_cast<float>(x) + 0.5f) * inverse_face_size;
                 float t = (static_cast<float>(y) + 0.5f) * inverse_face_size;
 
@@ -119,8 +96,6 @@ std::vector<Bitmap<Format, ChannelCount>> ConvertEquirectangularToCubeMap(const 
             }
         }
     }
-
-    std::cout << "DONE!\n";
 
     return result;
 }

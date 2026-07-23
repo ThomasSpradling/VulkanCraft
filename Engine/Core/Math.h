@@ -32,9 +32,18 @@ inline uint32_t KbpsToBytes(uint32_t kbps, double milliseconds) {
 }
 
 template<glm::length_t L, typename T, glm::qualifier Q>
-inline bool NearlyEqual(const glm::vec<L, T, Q> &vec1, const glm::vec<L, T, Q> &vec2, T threshold = Epsilon<T>) {
+constexpr inline bool NearlyEqual(const glm::vec<L, T, Q> &vec1, const glm::vec<L, T, Q> &vec2, T threshold = Epsilon<T>) {
     for (uint32_t i = 0; i < L; ++i) {
         if (vec1[i] - vec2[i] > threshold || vec2[i] - vec1[i] > threshold)
+            return false;
+    }
+    return true;
+}
+
+template<typename T, glm::qualifier Q>
+constexpr inline bool NearlyEqual(const glm::qua<T, Q> &quat1, const glm::qua<T, Q> &quat2, T threshold = Epsilon<T>) {
+    for (uint32_t i = 0; i < 4; ++i) {
+        if (quat1[i] - quat2[i] > threshold || quat2[i] - quat1[i] > threshold)
             return false;
     }
     return true;

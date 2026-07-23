@@ -96,7 +96,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     {
         auto *data = scene_buffer.Mapped<SceneUniformData>();
         data->projection = projection_matrix;
-        data->eye_position = glm::vec4(glm::vec3(camera_model[3]), 1.0f);
+        data->eye_position = glm::vec4(world.WorldPosition(camera), 1.0f);
         data->view = view_matrix;
         data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
         data->ambient = m_environment_settings.ambient_color * m_environment_settings.ambient_intensity;
@@ -140,7 +140,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
             gpu_light.color = light.color;
             gpu_light.color.w = light.intensity;
             gpu_light.range = light.range;
-            gpu_light.position = glm::vec3(world.GlobalMatrix(entity)[3]);;
+            gpu_light.position = glm::vec3(world.WorldPosition(entity));
     
             point_light_count++;
         });
@@ -190,7 +190,7 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         }
     });
         const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
-        glm::vec3 camera_translation = view_matrix[3];
+        glm::vec3 camera_translation = world.WorldPosition(camera);
         glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
 
         cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
@@ -268,16 +268,6 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     m_imgui_renderer->BeginFrame();
 
     m_render_ui();
-
-
-
-    // ImGui::ShowDemoWindow();
-
-    // // auto [texture_id, texture] = m_asset_manager->GetTexture(m_environment_map);
-    // // float width = static_cast<float>(texture.get().Extent().width);
-    // // float height = static_cast<float>(texture.get().Extent().height);
-    // VulkanImage &image = m_bindless_table->GetTexture(1);
-    // ImGui::Image(ImTextureRef(ImTextureID(1)), ImVec2(static_cast<float>(image.Extent().width), static_cast<float>(image.Extent().height)));
 
     m_imgui_renderer->EndFrame(cmd, {
         .type = AttachmentType::Color,
@@ -368,7 +358,7 @@ void Renderer::CreateObjects() {
     }
 
     m_skybox = m_asset_manager->CreateMesh(Shape::Cube(2.0f));
-    m_environment_map = m_asset_manager->LoadTextureCubeFromEquirectangular(ASSET_PATH "/textures/cowboy_town_saloon_4k.hdr", TextureFormat::RGB32Float);
+    m_environment_map = m_asset_manager->LoadTextureCubeFromEquirectangular(ASSET_PATH "/textures/cowboy_town_saloon_4k.hdr", TextureFormat::RGBA32_Float);
 
     CreateLights();
 

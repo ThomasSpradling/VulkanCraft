@@ -6,6 +6,9 @@
 #include "AssetManager/AssetManager.h"
 #include "AssetManager/GLTFModel.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
+
 // =============== //
 // ---- World ---- //
 // =============== //
@@ -262,6 +265,25 @@ glm::mat4 World::GlobalMatrix(Entity entity) {
     return ComputeGlobalTransform(entity);
 }
 
+std::tuple<glm::vec3, glm::quat, glm::vec3> World::WorldTRS(Entity entity) {
+    ComputeGlobalTransform(entity);
+
+    EntityNode &node = m_entities[entity.m_index];
+    return std::make_tuple(node.world_position, node.world_rotation, node.world_scale);
+}
+
+glm::vec3 World::WorldPosition(Entity entity) {
+    return std::get<0>(WorldTRS(entity));
+}
+
+glm::quat World::WorldRotation(Entity entity) {
+    return std::get<1>(WorldTRS(entity));
+}
+
+glm::vec3 World::WorldScale(Entity entity) {
+    return std::get<2>(WorldTRS(entity));
+}
+
 void World::Update() {
     for (uint32_t i = 0; i < m_entities.size(); ++i) {
         EntityNode& node = m_entities[i];
@@ -309,6 +331,7 @@ glm::mat4 World::ComputeLocalTransform(Entity entity) {
         node.local_matrix = transform
             ? transform->CalculateLocalMatrix()
             : glm::mat4(1.0f);
+
         node.local_dirty = false;
     }
     return node.local_matrix;
@@ -328,12 +351,15 @@ glm::mat4 World::ComputeGlobalTransform(Entity entity) {
     }
 
     if (node.global_dirty) {
-        const glm::mat4 local =
-            ComputeLocalTransform(entity);
+        const glm::mat4 local = ComputeLocalTransform(entity);
 
         node.global_matrix = IsAlive(parent)
             ? m_entities[parent.m_index].global_matrix * local
             : local;
+
+        glm::vec3 skew;
+        glm::vec4 perspective;
+        glm::decompose(node.global_matrix, node.world_scale, node.world_rotation, node.world_position, skew, perspective);
 
         node.global_dirty = false;
     }

@@ -506,7 +506,7 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
         ImageTextures &cached_image = image_cache[texture.source];
 
         if (needs_srgb && !cached_image.srgb_cached) {
-            cached_image.srgb_image = create_image(TextureFormat::RGBA8Srgb, "sRGB");
+            cached_image.srgb_image = create_image(TextureFormat::RGBA8_sRGB, "sRGB");
             cached_image.srgb_cached = true;
         }
 

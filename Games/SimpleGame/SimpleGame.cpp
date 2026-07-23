@@ -19,39 +19,39 @@
 void SimpleGame::Initialize(ClientContext &context) {
     // context.renderer.EnableVSync();
 
-    // Objects ////
-    // MaterialHandle gray_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
-    //     .base_color_factor = glm::vec4(0.0f, 0.5f, 0.3f, 1.0f),
-    //     .metallic_factor = 0.0f,
-    //     .roughness_factor = 1.0f,
-    // });
-    // MeshHandle torus_mesh = context.assets.CreateMesh(Shape::UVShape(
-    //     64,
-    //     24,
-    //     [&](float u, float v) -> glm::vec3 {
-    //         float theta = u * 2.0f * glm::pi<float>();
-    //         float phi = -v * 2.0f * glm::pi<float>();
+    // Objects
+    MaterialHandle gray_material = context.assets.CreateMaterial(MetallicRoughnessMaterial {
+        .base_color_factor = glm::vec4(0.0f, 0.5f, 0.3f, 1.0f),
+        .metallic_factor = 0.0f,
+        .roughness_factor = 0.4f,
+    });
+    MeshHandle torus_mesh = context.assets.CreateMesh(Shape::UVShape(
+        64,
+        24,
+        [&](float u, float v) -> glm::vec3 {
+            float theta = u * 2.0f * glm::pi<float>();
+            float phi = -v * 2.0f * glm::pi<float>();
 
-    //         float major_radius = 1.0f;
-    //         float minor_radius = 0.5f;
-    //         float ring_radius = major_radius + minor_radius * std::cos(phi);
+            float major_radius = 1.0f;
+            float minor_radius = 0.5f;
+            float ring_radius = major_radius + minor_radius * std::cos(phi);
 
-    //         return glm::vec3(
-    //             ring_radius * std::cos(theta),
-    //             minor_radius * std::sin(phi),
-    //             ring_radius * std::sin(theta)
-    //         );
-    //     }
-    // ));
+            return glm::vec3(
+                ring_radius * std::cos(theta),
+                minor_radius * std::sin(phi),
+                ring_radius * std::sin(theta)
+            );
+        }
+    ));
 
-    // Entity torus = context.world.CreateEntity("Torus");
-    // context.world.Add<ProceduralMeshComponent>(torus, ProceduralMeshComponent {
-    //     .mesh = torus_mesh,
-    //     .material = gray_material,
-    // });
+    Entity torus = context.world.CreateEntity("Torus");
+    context.world.Add<ProceduralMeshComponent>(torus, ProceduralMeshComponent {
+        .mesh = torus_mesh,
+        .material = gray_material,
+    });
 
-    GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
-    context.world.BuildGLTF(bottle);
+    // GLTFHandle bottle = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
+    // context.world.BuildGLTF(bottle);
     // auto &bottle_transform = context.world.Get<Transform>(bottle_entity);
     // bottle_transform.scale *= 10.0f;
 
@@ -143,18 +143,13 @@ void SimpleGame::Initialize(ClientContext &context) {
     //     .intensity = 10.0f,
     // });
 
-    TextureHandle wood = context.assets.LoadTexture2D(ASSET_PATH "/textures/example.png");
-    auto [texture_id, texture] = context.assets.GetTexture(wood);
-    // float width = static_cast<float>(texture.get().Extent().width);
-    // float height = static_cast<float>(texture.get().Extent().height);
+    // TextureHandle wood = context.assets.LoadTexture2D(ASSET_PATH "/textures/example.png");
+    // auto [texture_id, texture] = context.assets.GetTexture(wood);
 
-    // std::cout << "TEXTURE: " << texture_id << "\n";
-
-    context.renderer.RenderUI([texture_id]() {
-        // std::cout << "Rendering with texture: " << texture_id << "\n";
-        ImGui::Image(texture_id, ImVec2(200.0f, 200.0f));
-        ImGui::ShowDemoWindow();
-    });
+    // context.renderer.RenderUI([texture_id]() {
+    //     ImGui::Image(texture_id, ImVec2(200.0f, 200.0f));
+    //     ImGui::ShowDemoWindow();
+    // });
 }
 
 void SimpleGame::CreatePlayer(ClientContext &context) {

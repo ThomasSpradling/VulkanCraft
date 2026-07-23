@@ -13,8 +13,6 @@ Transform Transform::FromMatrix(const glm::mat4 &matrix) {
     glm::vec4 perspective;
     glm::decompose(matrix, scale, rotation, translation, skew, perspective);
 
-    // Assert(skew == glm::vec3(0.0f) && perspective == glm::vec4(0.0f) && scale != glm::vec3(0.0f), "Invalid matrix decomposition!");
-
     return Transform {
         .translation = translation,
         .rotation = rotation,

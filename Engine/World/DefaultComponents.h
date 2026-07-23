@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Core/Handle.h"
+#include "Core/Math.h"
 
 //// Transform ////
 
@@ -15,7 +16,11 @@ struct Transform {
     glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
     glm::vec3 scale { 1.0f };
 
-    bool operator==(const Transform &) const = default;
+    bool operator==(const Transform &other) const {
+        return NearlyEqual(translation, other.translation)
+            && NearlyEqual(rotation, other.rotation)
+            && NearlyEqual(scale, other.scale);
+    }
 
     static Transform FromMatrix(const glm::mat4 &matrix);
     glm::mat4 CalculateLocalMatrix() const;

@@ -150,6 +150,12 @@ public:
     glm::mat4 LocalMatrix(Entity entity);
     glm::mat4 GlobalMatrix(Entity entity);
 
+    // World translation, rotation, scale
+    std::tuple<glm::vec3, glm::quat, glm::vec3> WorldTRS(Entity entity);
+    glm::vec3 WorldPosition(Entity entity);
+    glm::quat WorldRotation(Entity entity);
+    glm::vec3 WorldScale(Entity entity);
+
     void Update();
 private:
     struct EntityNode {
@@ -168,6 +174,10 @@ private:
         glm::mat4 local_matrix { 1.0f };
         bool global_dirty = true;
         glm::mat4 global_matrix { 1.0f };
+
+        glm::vec3 world_position { 0.0f };
+        glm::quat world_rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+        glm::vec3 world_scale { 1.0f };
     };
 
     struct IComponentStorage {

@@ -176,7 +176,7 @@ private:
     MeshHandle m_skybox = MeshHandle::Invalid();
     TextureHandle m_environment_map = TextureHandle::Invalid();
 
-    std::function<void(void)> m_render_ui;
+    std::function<void(void)> m_render_ui = []() {};
 private:
     // void DrawGLTF(GLTFModel &model, const CommandBuffer &cmd);
 

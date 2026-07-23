@@ -46,10 +46,10 @@ public:
     ~AssetManager();
     
     TextureId GetTextureId(TextureHandle texture);
-    TextureHandle LoadTexture2D(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb, bool generate_mipmaps = false);
-    TextureHandle LoadTextureCubeFromEquirectangular(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8Srgb);
-    TextureHandle LoadTextureCubeFromVerticalCross(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8Srgb);
-    TextureHandle LoadTextureCubeFromFaces(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8Srgb);
+    TextureHandle LoadTexture2D(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8_sRGB, bool generate_mipmaps = false);
+    TextureHandle LoadTextureCubeFromEquirectangular(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
+    TextureHandle LoadTextureCubeFromVerticalCross(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
+    TextureHandle LoadTextureCubeFromFaces(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
     
     GLTFHandle LoadGLTF(const std::filesystem::path &path);
     MeshHandle CreateMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices);
@@ -103,7 +103,4 @@ private:
     uint32_t m_basic_material_buffer_index = 0;
 
     BindlessDescriptorTable &m_bindless_table;
-private:
-    // Returns [extent, bitmap data]. May replace format with a fallback as needed.
-    std::pair<glm::uvec2, std::vector<std::byte>> LoadImageData(const std::filesystem::path &path, TextureFormat &format);
 };

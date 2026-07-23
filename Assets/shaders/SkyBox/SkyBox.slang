@@ -1,5 +1,6 @@
 import Resources;
 import types;
+import SceneData;
 
 struct VertexInput {
     float3 position;
@@ -18,25 +19,29 @@ struct VertexOutput {
     float2 uv;
 };
 
-struct SkyBoxPushConstants {
+struct SkyboxData {
     float4x4 model;
-    float4x4 view;
-    float4x4 projection;
+    float4x4 view_projection;
     ImmutablePtr<VertexInput> vertex_buffer;
-    TextureId cube_map_id = 0;
+    uint envmap_id;
+};
+
+struct SkyBoxPushConstants {
+    ImmutablePtr<SkyboxData> skybox_data;
 };
 [[vk::push_constant]] ConstantBuffer<SkyBoxPushConstants> g_push_constant;
 
 [shader("vertex")]
 VertexOutput main_vert(uint vertex_id : SV_VertexID) {
+    ImmutablePtr<SkyboxData> data = g_push_constant.skybox_data;
+
     VertexOutput output;
-    VertexInput input = g_push_constant.vertex_buffer[vertex_id];
+    VertexInput input = data->vertex_buffer[vertex_id];
 
     float4 world_position = float4(input.position, 1.0f);
-    world_position = mul(world_position, g_push_constant.model);
+    world_position = mul(world_position, data->model);
     
-    float4 position = mul(world_position, g_push_constant.view);
-    position = mul(position, g_push_constant.projection);
+    float4 position = mul(world_position, data->view_projection);
 
     output.world_position = world_position.rgb;
     output.position = position;
@@ -46,7 +51,7 @@ VertexOutput main_vert(uint vertex_id : SV_VertexID) {
 
 [shader("fragment")]
 float4 main_frag(VertexOutput frag) : SV_Target {
-    float4 color = SampleTextureCube(g_push_constant.cube_map_id, 0, frag.world_position);
+    float4 color = SampleTextureCube(g_push_constant.skybox_data->envmap_id, 0, frag.world_position);
     // return color;
     return float4(color.rgb, 1);
 }

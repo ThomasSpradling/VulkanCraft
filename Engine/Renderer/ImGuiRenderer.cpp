@@ -34,13 +34,7 @@ ImGuiRenderer::ImGuiRenderer(Renderer &renderer)
 
     m_sampler = renderer.GetAssetManager().GetSampler(sampler_handle).first;
 
-    VkPushConstantRange range {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset = 0,
-        .size = sizeof(ImGuiPushConstant),
-    };
-
-    m_pipeline = VulkanPipeline::GraphicsBuilder(m_renderer.Device())
+    m_pipeline = VulkanPipeline::GraphicsBuilder(m_renderer.Device(), m_renderer.GlobalPipelineLayout())
         .VertexShader(m_shader, "main_vert")
         .FragmentShader(m_shader, "main_frag")
         .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
@@ -51,8 +45,6 @@ ImGuiRenderer::ImGuiRenderer(Renderer &renderer)
             .blending_mode = BlendMode::Alpha,
         })
         // .SetDepthAttachmentFormat(m_renderer.Device().GetDepthOnlyFormat())
-        .AddPushConstant(range)
-        .AddDescriptorSetLayout(m_renderer.BindlessTable().GlobalDescriptorLayout())
         .Build();
 }
 
@@ -183,7 +175,7 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
         }
     }
 
-    cmd.BindDescriptorSet(0, *m_pipeline, m_renderer.BindlessTable().GlobalDescriptorSet());
+    // cmd.BindDescriptorSet(0, *m_pipeline, m_renderer.BindlessTable().GlobalDescriptorSet());
     
     cmd.SetViewport(glm::vec2(0), glm::vec2(width, height));
 
@@ -261,7 +253,7 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
             if (draw_command.UserCallback) {
                 if (draw_command.UserCallback == ImDrawCallback_ResetRenderState) {
                     cmd.SetViewport(glm::vec2(0), glm::vec2(width, height));
-                    cmd.BindDescriptorSet(0, *m_pipeline, m_renderer.BindlessTable().GlobalDescriptorSet());
+                    // cmd.BindDescriptorSet(0, *m_pipeline, m_renderer.BindlessTable().GlobalDescriptorSet());
                     cmd.BindIndexBuffer(index_buffer.Buffer(), 0, VK_INDEX_TYPE_UINT16);
                     cmd.BindPipeline(*m_pipeline);
                 } else {

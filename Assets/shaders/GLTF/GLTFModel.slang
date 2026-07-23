@@ -68,6 +68,18 @@ float3 ContributePointLight(PointLight light, float3 surface_color, float3 surfa
     return brdf * light.Attenuation(distance) * light.color.rgb * power * max(dot(shading_normal, light_dir), 0.0f);
 }
 
+bool HasEnvironmentMap() {
+    return g_push_constant.envmap_id > 0;
+}
+
+float3 ContributeEnvironmentMap(float3 shading_normal, float3 view_dir) {
+    if (!HasEnvironmentMap())
+        return float3(1.0f);
+
+    float3 reflect_dir = reflect(-view_dir, shading_normal);
+    return SampleTextureCube(g_push_constant.envmap_id, 0, reflect_dir).rgb;
+}
+
 [[SpecializationConstant]] const bool WIREFRAME = false;
 
 [shader("vertex")]
@@ -171,10 +183,7 @@ float4 main_frag(VertexOutput frag) : SV_Target {
         color += ContributePointLight(point_lights[i], surface_color.rgb, frag.world_position.xyz, shading_normal, metallic, roughness, view_dir);
     }
 
-    float3 reflect_dir = reflect(-view_dir, shading_normal);
-    float4 env_color = SampleTextureCube(g_push_constant.envmap_id, 0, reflect_dir);
-    // float3 env_brdf = ComputeBRDF(surface_color.rgb, roughness, metallic, shading_normal, reflect_dir, view_dir);
-    // color += env_color.rgb * env_brdf * max(dot(shading_normal, reflect_dir), 0.0f);
+    color = ContributeEnvironmentMap(shading_normal, view_dir);
     
-    return float4(env_color.rgb, surface_color.a);
+    return float4(color, surface_color.a);
 }

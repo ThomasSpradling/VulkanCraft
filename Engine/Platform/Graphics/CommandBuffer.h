@@ -64,7 +64,7 @@ struct ImageAttachment {
     bool msaa = false;
     const VulkanImage *resolve_image = nullptr;
 
-    bool should_clear = true;
+    bool should_clear = false;
 
     glm::vec4 clear_color = glm::vec4(0.0f);
     float clear_depth = 1.0f;

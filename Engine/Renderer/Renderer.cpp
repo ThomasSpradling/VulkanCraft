@@ -3,6 +3,7 @@
 #include "AssetManager/GPUStructs.h"
 #include "AssetManager/Material.h"
 #include "Common.h"
+#include "DebugRenderer.h"
 #include "ImGuiRenderer.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
@@ -47,6 +48,7 @@ Renderer::~Renderer() {
 
     m_device.GetGarbageCollector().CollectAll();
 
+    m_debug_canvas.reset();
     m_imgui_renderer.reset();
     DestroyObjects();
 
@@ -58,6 +60,7 @@ void Renderer::Initialize() {
     CreateObjects();
 
     m_imgui_renderer = std::make_unique<ImGuiRenderer>(*this);
+    m_debug_canvas = std::make_unique<DebugCanvas>(*this);
 }
 
 void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions &options) {
@@ -147,8 +150,6 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
         data->point_light_count = point_light_count;
     }
 
-    //// Draw Scene ////
-
     CommandBuffer &cmd = *frame.command_buffer;
     VulkanImage &swapchain_image = m_swapchain->CurrentImage();
     SwapChainContext &context = m_swapchain_data[m_swapchain->CurrentImageIndex()];
@@ -161,67 +162,28 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
 
-    std::vector<ImageAttachment> attachments {};
-    attachments.push_back({
-        .type = AttachmentType::Color,
-        .image = *context.draw_image,
-        .should_clear = true,
-        .clear_color = clear_color,
-    });
-    attachments.push_back({ .type = AttachmentType::Depth, .image = *context.depth_buffer });
+    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
 
-    //// Draw Cube Map ////
-    TextureId envmap_id = m_asset_manager->GetTexture(m_environment_map).first;
-
-    cmd.BeginLabel("Sky Box", glm::vec4(1.0f, 1.0f, 0.8f, 1.0f));
-    cmd.BindDescriptorSet(0, *m_skybox_pipeline, m_bindless_table->GlobalDescriptorSet());
-    cmd.BindPipeline(*m_skybox_pipeline);
-    cmd.BeginRendering({
-        ImageAttachment {
-            .type = AttachmentType::Color,
-            .image = *context.draw_image,
-            .should_clear = true,
-            .clear_color = clear_color,
-        },
-        ImageAttachment {
-            .type = AttachmentType::Depth,
-            .image = *context.depth_buffer,
-            .should_clear = true,
-        }
-    });
-        const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
-        glm::vec3 camera_translation = world.WorldPosition(camera);
-        glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
-
-        cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
-            .model = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f)),
-            .view = camera_transform,
-            .projection = projection_matrix,
-            .vertex_buffer = mesh.VertexBuffer().DeviceAddress(),
-            .cube_map_id = envmap_id,
-        });
-        cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
-        cmd.DrawIndexed(mesh.IndexCount());
-    cmd.EndRendering();
-    cmd.EndLabel();
+    //// Draw Scene Geometry ////
 
     cmd.BeginLabel("Draw Scene");
     cmd.BindPipeline(*m_triangle_pipeline);
-    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
+    // cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
     cmd.BeginRendering({
         ImageAttachment {
             .type = AttachmentType::Color,
             .image = *context.draw_image,
-            .should_clear = false,
+            .should_clear = true,
             .clear_color = clear_color,
         },
         ImageAttachment {
             .type = AttachmentType::Depth,
             .image = *context.depth_buffer,
-            .should_clear = false,
+            .should_clear = true,
         }
     });
     m_push_constant.material_buffer = m_asset_manager->MaterialBuffer().DeviceAddress();
+
     world.Each<ProceduralMeshComponent>([&](Entity entity, ProceduralMeshComponent &component) {
         if (!component.visible)
             return;
@@ -234,7 +196,6 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
 
         m_push_constant.model = world.GlobalMatrix(entity);
         m_push_constant.material_id = material.material_index;
-        m_push_constant.envmap_id = envmap_id;
 
         cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
         cmd.DrawIndexed(mesh.IndexCount());
@@ -262,6 +223,63 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     cmd.EndRendering();
     cmd.EndLabel();
 
+    //// Draw Cube Map ////
+    if (m_environment_settings.environment_map) {
+        TextureId envmap_id = m_asset_manager->GetTexture(m_environment_settings.environment_map).first;
+    
+        cmd.BeginLabel("Sky Box", glm::vec4(1.0f, 1.0f, 0.8f, 1.0f));
+        // cmd.BindDescriptorSet(0, *m_skybox_pipeline, m_bindless_table->GlobalDescriptorSet());
+        cmd.BindPipeline(*m_skybox_pipeline);
+        cmd.BeginRendering({
+            ImageAttachment {
+                .type = AttachmentType::Color,
+                .image = *context.draw_image,
+            },
+            ImageAttachment {
+                .type = AttachmentType::Depth,
+                .image = *context.depth_buffer,
+            }
+        });
+            const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
+            glm::vec3 camera_translation = world.WorldPosition(camera);
+            glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
+    
+            VulkanBuffer &skybox_data = m_asset_manager->GetBuffer(frame.skybox_data);
+            auto *data = skybox_data.Mapped<GPUSkyboxData>();
+            data->vertex_buffer = mesh.VertexBuffer().DeviceAddress();
+            data->envmap_id = envmap_id;
+            data->model = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f));
+            data->view_projection = projection_matrix * camera_transform;
+
+            cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
+                .skybox_data = skybox_data.DeviceAddress(),
+            });
+            cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
+            cmd.DrawIndexed(mesh.IndexCount());
+        cmd.EndRendering();
+        cmd.EndLabel();
+
+        m_push_constant.envmap_id = envmap_id;
+    }
+
+    //// Draw Debug ////
+
+    cmd.BeginLabel("Draw Debug Lines");
+
+    m_debug_canvas->Render(cmd, projection_matrix * view_matrix,
+        ImageAttachment {
+            .type = AttachmentType::Color,
+            .image = *context.draw_image,
+        },
+        ImageAttachment {
+            .type = AttachmentType::Depth,
+            .image = *context.depth_buffer,
+        }
+    );
+
+    m_debug_canvas->Clear();
+    cmd.EndLabel();
+
     //// Draw ImGui ////
 
     cmd.BeginLabel("Render ImGui");
@@ -269,10 +287,9 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
 
     m_render_ui();
 
-    m_imgui_renderer->EndFrame(cmd, {
+    m_imgui_renderer->EndFrame(cmd, ImageAttachment {
         .type = AttachmentType::Color,
         .image = *context.draw_image,
-        .should_clear = false,
     });
     cmd.EndLabel();
     
@@ -357,8 +374,24 @@ void Renderer::CreateObjects() {
         });
     }
 
+    VkDescriptorSetLayout descriptor_set_layout = m_bindless_table->GlobalDescriptorLayout();
+    VkPushConstantRange push_constant_range {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = MaxPushConstantSize,
+    };
+
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &descriptor_set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_constant_range,
+    };
+
+    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &m_global_pipeline_layout));
+
     m_skybox = m_asset_manager->CreateMesh(Shape::Cube(2.0f));
-    m_environment_map = m_asset_manager->LoadTextureCubeFromEquirectangular(ASSET_PATH "/textures/cowboy_town_saloon_4k.hdr", TextureFormat::RGBA32_Float);
 
     CreateLights();
 
@@ -373,6 +406,8 @@ void Renderer::CreateObjects() {
 }
 
 void Renderer::DestroyObjects() {
+    vkDestroyPipelineLayout(m_device.Device(), m_global_pipeline_layout, nullptr);
+
     DestroyTrianglePipeline();
     DestroySwapChainObjects();
 
@@ -412,12 +447,6 @@ void Renderer::DestroySwapChainObjects() {
 void Renderer::CreateTrianglePipeline() {
     // Triangle Pipeline
     {
-        VkPushConstantRange range {
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            .offset = 0,
-            .size = sizeof(PushConstantData),
-        };
-    
         VkSpecializationMapEntry entry_is_wireframe {
             .constantID = 0,
             .offset = offsetof(SpecializationConstantData, is_wireframe),
@@ -433,7 +462,7 @@ void Renderer::CreateTrianglePipeline() {
     
         Assert(m_triangle_shader, "Triangle shader was not compiled!");
     
-        auto builder = VulkanPipeline::GraphicsBuilder(m_device)
+        auto builder = VulkanPipeline::GraphicsBuilder(m_device, m_global_pipeline_layout)
             .VertexShader(*m_triangle_shader, "main_vert")
             .FragmentShader(*m_triangle_shader, "main_frag")
             
@@ -447,8 +476,6 @@ void Renderer::CreateTrianglePipeline() {
                 .blending_mode = BlendMode::Disabled,
             })
             .SetDepthAttachmentFormat(m_device.GetDepthOnlyFormat())
-            .AddPushConstant(range)
-            .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
             .SetSpecializationConstants(specialization_info);
     
         if (m_triangle_pipeline)
@@ -468,13 +495,7 @@ void Renderer::CreateTrianglePipeline() {
 
     // Skybox Pipeline
     {
-        VkPushConstantRange range {
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            .offset = 0,
-            .size = sizeof(SkyboxPushConstants),
-        };
-
-        m_skybox_pipeline = VulkanPipeline::GraphicsBuilder(m_device)
+        m_skybox_pipeline = VulkanPipeline::GraphicsBuilder(m_device, m_global_pipeline_layout)
             .VertexShader(*m_skybox_shader, "main_vert")
             .FragmentShader(*m_skybox_shader, "main_frag")
             .AddColorAttachment(ColorAttachment {
@@ -485,8 +506,6 @@ void Renderer::CreateTrianglePipeline() {
             .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .SetPolygonMode(VK_POLYGON_MODE_FILL)
             .EnableDepthTest()
-            .AddPushConstant(range)
-            .AddDescriptorSetLayout(m_bindless_table->GlobalDescriptorLayout())
             .Build();
         m_skybox_pipeline->SetDebugName("SkyBox Pipeline");
     }
@@ -530,6 +549,12 @@ void Renderer::CreateLights() {
             .usage = BufferUsageBits::Storage,
             .size = sizeof(GPUPointLight) * MaxPointLights,
             .debug_name = std::format("Point Lights [{}]", i),
+        });
+
+        frame.skybox_data = m_asset_manager->CreateBuffer(GPUBufferData {
+            .usage = BufferUsageBits::Storage,
+            .size = sizeof(GPUSkyboxData),
+            .debug_name = std::format("Skybox Data [{}]", i),
         });
     }
 }

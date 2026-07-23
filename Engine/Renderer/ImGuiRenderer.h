@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetManager/GPUStructs.h"
+#include "Common.h"
 #include "Core/Handle.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/VulkanPipeline.h"
@@ -23,6 +24,7 @@ private:
         TextureId texture_id;
         SamplerId sampler_id;
     };
+    static_assert(sizeof(ImGuiPushConstant) <= MaxPushConstantSize);
 
     struct FrameData {
         BufferHandle vertex_buffer;

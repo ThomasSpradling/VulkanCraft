@@ -72,3 +72,10 @@ struct GPULightData {
     float pad_;
     VkDeviceAddress point_lights;
 };
+
+struct GPUSkyboxData {
+    glm::mat4 model;
+    glm::mat4 view_projection;
+    VkDeviceAddress vertex_buffer;
+    uint32_t envmap_id;
+};

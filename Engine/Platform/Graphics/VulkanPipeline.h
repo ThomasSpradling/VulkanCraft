@@ -44,7 +44,7 @@ enum class AttributeFormat : uint8_t {
 class VulkanPipeline;
 class PipelineBuilder_Graphics {
 public:
-    PipelineBuilder_Graphics(const VulkanDevice &device);
+    PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout);
     
     PipelineBuilder_Graphics &AddBinding(uint32_t binding, uint32_t stride, VkVertexInputRate input_rate = VK_VERTEX_INPUT_RATE_VERTEX);
     PipelineBuilder_Graphics &AddAttribute(uint32_t location, uint32_t binding, AttributeFormat format, uint32_t offset = 0);
@@ -92,8 +92,6 @@ public:
 
     PipelineBuilder_Graphics &AddDynamicState(VkDynamicState dynamic_state);
     
-    PipelineBuilder_Graphics &AddPushConstant(const VkPushConstantRange &range);
-    PipelineBuilder_Graphics &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
     PipelineBuilder_Graphics &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
@@ -160,23 +158,21 @@ private:
         VkFormat stencil_format = VK_FORMAT_UNDEFINED;
     } m_attachment_formats;
 
-    std::vector<VkPushConstantRange> m_push_constants;
-    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
     VkSpecializationInfo *m_specialization_constants = nullptr;
 
     VkPipeline m_base_pipeline = VK_NULL_HANDLE;
+
+    VkPipelineLayout m_layout = VK_NULL_HANDLE;
 private:
     PipelineBuilder_Graphics &EmplaceShader(ShaderStage stage, std::optional<ShaderEntry> &out_entry, const CompiledShader &shader, const std::string &entry);
 };
 
 class PipelineBuilder_Compute {
 public:
-    PipelineBuilder_Compute(const VulkanDevice &device);
+    PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout);
 
     PipelineBuilder_Compute &SetShader(const CompiledShader &shader, const std::string &entry_name = "");
 
-    PipelineBuilder_Compute &AddPushConstant(const VkPushConstantRange &range);
-    PipelineBuilder_Compute &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
     PipelineBuilder_Compute &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
@@ -186,9 +182,9 @@ private:
     CompiledShader m_shader;
     ShaderEntry m_compute_shader;
 
-    std::vector<VkPushConstantRange> m_push_constants;
-    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
     VkSpecializationInfo *m_specialization_constants = nullptr;
+
+    VkPipelineLayout m_layout = VK_NULL_HANDLE;
 };
 
 struct ModuleEntry {
@@ -208,7 +204,7 @@ struct ModuleEntry {
 
 class PipelineBuilder_RayTracing {
 public:
-    PipelineBuilder_RayTracing(const VulkanDevice &device);
+    PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout);
 
     PipelineBuilder_RayTracing &AddShader(const CompiledShader &shader);
 
@@ -223,8 +219,6 @@ public:
 
     const std::vector<VkRayTracingShaderGroupCreateInfoKHR> &GetGroups() const { return m_groups; }
     
-    PipelineBuilder_RayTracing &AddPushConstant(const VkPushConstantRange &range);
-    PipelineBuilder_RayTracing &AddDescriptorSetLayout(const VkDescriptorSetLayout &layout);
     PipelineBuilder_RayTracing &SetSpecializationConstants(VkSpecializationInfo &info);
 
     std::unique_ptr<VulkanPipeline> Build();
@@ -238,9 +232,9 @@ private:
 
     uint32_t m_max_recursion_depth = 1;
 
-    std::vector<VkPushConstantRange> m_push_constants;
-    std::vector<VkDescriptorSetLayout> m_descriptor_layouts;
     VkSpecializationInfo *m_specialization_constants = nullptr;
+
+    VkPipelineLayout m_layout = VK_NULL_HANDLE;
 private:
     uint32_t ComputeShaderIndex(const ModuleEntry &entry, VkShaderStageFlags allowed_stages);
 };
@@ -253,13 +247,13 @@ public:
     VulkanPipeline(const VulkanDevice &device);
     ~VulkanPipeline();
 
-    static inline PipelineBuilder_Graphics GraphicsBuilder(const VulkanDevice &device) { return PipelineBuilder_Graphics(device); }
-    static inline PipelineBuilder_Compute ComputeBuilder(const VulkanDevice &device)  { return PipelineBuilder_Compute(device); }
-    static inline PipelineBuilder_RayTracing RayTracingBuilder(const VulkanDevice &device)  { return PipelineBuilder_RayTracing(device); }
+    static inline PipelineBuilder_Graphics GraphicsBuilder(const VulkanDevice &device, VkPipelineLayout layout) { return PipelineBuilder_Graphics(device, layout); }
+    static inline PipelineBuilder_Compute ComputeBuilder(const VulkanDevice &device, VkPipelineLayout layout)  { return PipelineBuilder_Compute(device, layout); }
+    static inline PipelineBuilder_RayTracing RayTracingBuilder(const VulkanDevice &device, VkPipelineLayout layout)  { return PipelineBuilder_RayTracing(device, layout); }
 
     VkPipeline Pipeline() const { return m_pipeline; };
     VkPipelineBindPoint BindPoint() const { return m_pipeline_type; };
-    VkPipelineLayout Layout() const { return m_pipeline_layout; };
+    VkPipelineLayout Layout() const { return m_pipeline_layout; }
 
     void SetDebugName(std::string_view name);
 private:

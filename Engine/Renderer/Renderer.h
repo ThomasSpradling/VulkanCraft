@@ -5,6 +5,7 @@
 #include "AssetManager/Mesh.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
+#include "DebugRenderer.h"
 #include "ImGuiRenderer.h"
 #include "Platform/Graphics/VulkanDevice.h"
 #include "Platform/Graphics/VulkanSwapChain.h"
@@ -86,7 +87,10 @@ public:
     AssetManager &GetAssetManager() { Assert(m_asset_manager, "Must have asset manager!"); return *m_asset_manager; }
     const Window &GetWindow() const { return m_window; }
     BindlessDescriptorTable &BindlessTable() { return *m_bindless_table; }
+    VkPipelineLayout GlobalPipelineLayout() { return m_global_pipeline_layout; }
     const ShaderCompiler &GetShaderCompiler() const { return *m_shader_compiler; }
+
+    DebugCanvas &GetDebugCanvas() { return *m_debug_canvas; }
 private:
     struct FrameContext {
         std::unique_ptr<VulkanCommandPool> command_pool;
@@ -99,6 +103,9 @@ private:
         // Lights
         BufferHandle light_data = BufferHandle::Invalid();
         BufferHandle point_lights = BufferHandle::Invalid();
+
+        // Skybox
+        BufferHandle skybox_data = BufferHandle::Invalid();
     };
     
     struct SwapChainContext {
@@ -125,14 +132,12 @@ private:
         uint32_t material_id = 0;
         uint32_t envmap_id = 0;
     };
+    static_assert(sizeof(PushConstantData) <= MaxPushConstantSize);
 
     struct SkyboxPushConstants {
-        glm::mat4 model;
-        glm::mat4 view;
-        glm::mat4 projection;
-        VkDeviceAddress vertex_buffer;
-        TextureId cube_map_id = 0;
+        VkDeviceAddress skybox_data;
     };
+    static_assert(sizeof(SkyboxPushConstants) <= MaxPushConstantSize);
 
     struct SpecializationConstantData {
         VkBool32 is_wireframe = false;
@@ -171,10 +176,12 @@ private:
     SpecializationConstantData m_specialization_constant;
 
     std::unique_ptr<BindlessDescriptorTable> m_bindless_table;
+    VkPipelineLayout m_global_pipeline_layout = VK_NULL_HANDLE;
+
     std::unique_ptr<ImGuiRenderer> m_imgui_renderer;
+    std::unique_ptr<DebugCanvas> m_debug_canvas;
 
     MeshHandle m_skybox = MeshHandle::Invalid();
-    TextureHandle m_environment_map = TextureHandle::Invalid();
 
     std::function<void(void)> m_render_ui = []() {};
 private:

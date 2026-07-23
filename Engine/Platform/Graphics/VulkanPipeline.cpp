@@ -11,8 +11,9 @@
 // ---- Graphics Pipeline Builder ---- //
 // =================================== //
 
-PipelineBuilder_Graphics::PipelineBuilder_Graphics(const VulkanDevice &device)
+PipelineBuilder_Graphics::PipelineBuilder_Graphics(const VulkanDevice &device, VkPipelineLayout layout)
     : m_device(device)
+    , m_layout(layout)
 {}
 
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::FromBase(VkPipeline base_pipeline) {
@@ -331,16 +332,6 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddDynamicState(VkDynamicSta
     return *this;
 }
 
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddPushConstant(const VkPushConstantRange &range) {
-    m_push_constants.push_back(range);
-    return *this;
-}
-
-PipelineBuilder_Graphics &PipelineBuilder_Graphics::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
-    m_descriptor_layouts.push_back(layout);
-    return *this;
-}
-
 PipelineBuilder_Graphics &PipelineBuilder_Graphics::SetSpecializationConstants(VkSpecializationInfo &info) {
     m_specialization_constants = &info;
     return *this;
@@ -486,17 +477,6 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
         .stencilAttachmentFormat = stencil_format,
     };
 
-    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
-        .pSetLayouts = m_descriptor_layouts.data(),
-        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
-        .pPushConstantRanges = m_push_constants.data(),
-    };
-
-    VkPipelineLayout pipeline_layout;
-    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
-
     VkGraphicsPipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &rendering_create_info,
@@ -512,7 +492,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
         .pDepthStencilState = &depth_stencil_state_create_info,
         .pColorBlendState = &color_blend_state_create_info,
         .pDynamicState = &dynamic_state_create_info,
-        .layout = pipeline_layout,
+        .layout = m_layout,
         .renderPass = VK_NULL_HANDLE,
         .subpass = 0,
         .basePipelineHandle = m_base_pipeline,
@@ -529,7 +509,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
     auto result = std::make_unique<VulkanPipeline>(m_device);
     result->m_pipeline_type = VK_PIPELINE_BIND_POINT_GRAPHICS;
     result->m_pipeline = pipeline;
-    result->m_pipeline_layout = pipeline_layout;
+    result->m_pipeline_layout = m_layout;
     return result;
 }
 
@@ -557,8 +537,9 @@ PipelineBuilder_Graphics &PipelineBuilder_Graphics::EmplaceShader(ShaderStage st
 // ---- Compute Pipeline Builder ---- //
 // ================================== //
 
-PipelineBuilder_Compute::PipelineBuilder_Compute(const VulkanDevice &device)
+PipelineBuilder_Compute::PipelineBuilder_Compute(const VulkanDevice &device, VkPipelineLayout layout)
     : m_device(device)
+    , m_layout(layout)
 {}
 
 PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader &shader, const std::string &entry_name) {
@@ -587,16 +568,6 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader
     return *this;
 }
 
-PipelineBuilder_Compute &PipelineBuilder_Compute::AddPushConstant(const VkPushConstantRange &range) {
-    m_push_constants.push_back(range);
-    return *this;
-}
-
-PipelineBuilder_Compute &PipelineBuilder_Compute::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
-    m_descriptor_layouts.push_back(layout);
-    return *this;
-}
-
 PipelineBuilder_Compute &PipelineBuilder_Compute::SetSpecializationConstants(VkSpecializationInfo &info) {
     m_specialization_constants = &info;
     return *this;
@@ -614,22 +585,11 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
         .pSpecializationInfo = m_specialization_constants,
     };
 
-    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
-        .pSetLayouts = m_descriptor_layouts.data(),
-        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
-        .pPushConstantRanges = m_push_constants.data(),
-    };
-
-    VkPipelineLayout pipeline_layout;
-    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
-
     VkComputePipelineCreateInfo pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
         .stage = shader_stage,
-        .layout = pipeline_layout,
+        .layout = m_layout,
     };
 
     VkPipeline pipeline;
@@ -638,7 +598,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
     auto result = std::make_unique<VulkanPipeline>(m_device);
     result->m_pipeline_type = VK_PIPELINE_BIND_POINT_COMPUTE;
     result->m_pipeline = pipeline;
-    result->m_pipeline_layout = pipeline_layout;
+    result->m_pipeline_layout = m_layout;
     return result;
 }
 
@@ -646,8 +606,9 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
 // ---- Ray Tracing Pipeline Builder ---- //
 // ====================================== //
 
-PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(const VulkanDevice &device)
+PipelineBuilder_RayTracing::PipelineBuilder_RayTracing(const VulkanDevice &device, VkPipelineLayout layout)
     : m_device(device)
+    , m_layout(layout)
 {}
 
 PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddShader(const CompiledShader &shader) {
@@ -727,17 +688,6 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDynamicState(VkDynami
     return *this;
 }
 
-
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddPushConstant(const VkPushConstantRange &range) {
-    m_push_constants.push_back(range);
-    return *this;
-}
-
-PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::AddDescriptorSetLayout(const VkDescriptorSetLayout &layout) {
-    m_descriptor_layouts.push_back(layout);
-    return *this;
-}
-
 PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetSpecializationConstants(VkSpecializationInfo &info) {
     m_specialization_constants = &info;
     return *this;
@@ -780,17 +730,6 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
     };
 
     //// Create Pipeline ////
-    VkPipelineLayoutCreateInfo pipeline_layout_create_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = static_cast<uint32_t>(m_descriptor_layouts.size()),
-        .pSetLayouts = m_descriptor_layouts.data(),
-        .pushConstantRangeCount = static_cast<uint32_t>(m_push_constants.size()),
-        .pPushConstantRanges = m_push_constants.data(),
-    };
-
-    VkPipelineLayout pipeline_layout;
-    VK_CHECK(vkCreatePipelineLayout(m_device.Device(), &pipeline_layout_create_info, nullptr, &pipeline_layout));
-
     VkRayTracingPipelineCreateInfoKHR pipeline_create_info {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
         .pNext = nullptr,
@@ -800,7 +739,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
         .pGroups = m_groups.data(),
         .maxPipelineRayRecursionDepth = m_max_recursion_depth,
         .pDynamicState = &dynamic_state_create_info,
-        .layout = pipeline_layout,
+        .layout = m_layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -809,7 +748,7 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
     auto result = std::make_unique<VulkanPipeline>(m_device);
     result->m_pipeline_type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
     result->m_pipeline = pipeline;
-    result->m_pipeline_layout = pipeline_layout;
+    result->m_pipeline_layout = m_layout;
     return result;
 }
 
@@ -870,9 +809,6 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice &device)
 {}
 
 VulkanPipeline::~VulkanPipeline() {
-    if (m_pipeline_layout != VK_NULL_HANDLE)
-        vkDestroyPipelineLayout(m_device.Device(), m_pipeline_layout, nullptr);
-
     if (m_pipeline != VK_NULL_HANDLE)
         vkDestroyPipeline(m_device.Device(), m_pipeline, nullptr);
 }
@@ -880,6 +816,5 @@ VulkanPipeline::~VulkanPipeline() {
 void VulkanPipeline::SetDebugName(std::string_view name) {
     std::string debug_name(name);
     m_device.SetDebugName(m_pipeline, debug_name);
-    m_device.SetDebugName(m_pipeline_layout, debug_name + " Layout");
 }
 

@@ -109,6 +109,15 @@ void SimpleGame::Initialize(ClientContext &context) {
         .material = rim_light_material,
     });
 
+    // Textures //
+
+    TextureHandle envmap = context.assets.LoadTextureCubeFromEquirectangular(ASSET_PATH "/textures/cowboy_town_saloon_4k.hdr", TextureFormat::RGBA32_Float);
+    context.renderer.SetEnvironment(EnvironmentSettings {
+        .ambient_color = glm::vec4(1.0f),
+        .ambient_intensity = 0.1f,
+        .environment_map = envmap,
+    });
+
     // GLTFHandle helmet = context.assets.LoadGLTF(ASSET_PATH "/models/DamagedHelmet.glb");
     // Entity helmet_entity = context.world.BuildGLTF(helmet);
     // auto &helmet_trasnform = context.world.Get<Transform>(helmet_entity);
@@ -143,13 +152,13 @@ void SimpleGame::Initialize(ClientContext &context) {
     //     .intensity = 10.0f,
     // });
 
-    // TextureHandle wood = context.assets.LoadTexture2D(ASSET_PATH "/textures/example.png");
-    // auto [texture_id, texture] = context.assets.GetTexture(wood);
+    TextureHandle wood = context.assets.LoadTexture2D(ASSET_PATH "/textures/example.png");
+    auto [texture_id, texture] = context.assets.GetTexture(wood);
 
-    // context.renderer.RenderUI([texture_id]() {
-    //     ImGui::Image(texture_id, ImVec2(200.0f, 200.0f));
-    //     ImGui::ShowDemoWindow();
-    // });
+    context.renderer.RenderUI([texture_id]() {
+        ImGui::Image(texture_id, ImVec2(200.0f, 200.0f));
+        ImGui::ShowDemoWindow();
+    });
 }
 
 void SimpleGame::CreatePlayer(ClientContext &context) {
@@ -195,6 +204,11 @@ void SimpleGame::Update(double delta_time, ClientContext &context) {
 }
 
 void SimpleGame::Render(double delta_time, ClientContext &context) {
+    DebugCanvas &canvas = context.renderer.GetDebugCanvas();
+
+    canvas.DrawLine(glm::vec3(0.0f), glm::vec3(2.0f, 0.0f, 2.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+    canvas.DrawSphere(glm::vec3(0.0f), 2.0f);
+
     context.renderer.RenderScene(context.world, m_camera, {});
 }
 

@@ -48,8 +48,7 @@ public:
     TextureId GetTextureId(TextureHandle texture);
     TextureHandle LoadTexture2D(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8_sRGB, bool generate_mipmaps = false);
     TextureHandle LoadTextureCubeFromEquirectangular(const std::filesystem::path &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
-    TextureHandle LoadTextureCubeFromVerticalCross(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
-    TextureHandle LoadTextureCubeFromFaces(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
+    // TextureHandle LoadTextureCubeFromFaces(const std::array<std::filesystem::path, 6> &path, TextureFormat format = TextureFormat::RGBA8_sRGB);
     
     GLTFHandle LoadGLTF(const std::filesystem::path &path);
     MeshHandle CreateMesh(const std::vector<MeshVertex> &vertices, const std::vector<uint32_t> &indices);

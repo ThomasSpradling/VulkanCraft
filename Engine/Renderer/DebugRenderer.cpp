@@ -57,6 +57,8 @@ void DebugCanvas::DrawLine(glm::vec3 from_position, glm::vec3 to_position, std::
 }
 
 void DebugCanvas::DrawSphere(glm::vec3 center_position, float radius, std::optional<glm::vec4> color) {
+    ENGINE_PROFILER_FUNCTION();
+
     constexpr int segment_count = 24;
     constexpr int ring_count = 12;
 
@@ -240,7 +242,7 @@ void DebugCanvas::Render(const CommandBuffer &cmd, const glm::mat4 &transform, c
 
         frame.vertex_buffer = assets.CreateBuffer(GPUBufferData {
             .usage = BufferUsageBits::Storage,
-            .storage_type = StorageType::Device,
+            .storage_type = StorageType::HostVisible,
             .size = required_size,
             .data = m_vertices.data(),
             .debug_name = std::format("Debug Line Buffer [{}]", m_renderer.FrameIndex()),

@@ -1,6 +1,7 @@
 #include "ImGuiRenderer.h"
 #include "AssetManager/Buffer.h"
 #include "AssetManager/Texture.h"
+#include "Core/errors.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Renderer.h"
 #include <imgui.h>
@@ -22,7 +23,7 @@ ImGuiRenderer::ImGuiRenderer(Renderer &renderer)
     ImGui_ImplGlfw_InitForOther(renderer.GetWindow().GetHandle(), true);
 
     std::optional<CompiledShader> shader = renderer.GetShaderCompiler().Compile("ImGui");
-    Assert(shader, "Cannot compile ImGui shader!");
+    ENGINE_ASSERT(shader, "Cannot compile ImGui shader!");
 
     m_shader = std::move(*shader);
     auto sampler_handle = renderer.GetAssetManager().CreateSampler(TextureSamplerData {
@@ -92,9 +93,9 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
                 case ImTextureStatus_Destroyed:
                     continue;
                 case ImTextureStatus_WantCreate: {
-                    Assert(tex->TexID == ImTextureID_Invalid && !tex->BackendUserData, "Invalid ImGui Texture!");
-                    Assert(tex->Format == ImTextureFormat_RGBA32, "Invalid ImGui Texture!");
-                    Assert(tex->BytesPerPixel == 4, "Invalid ImGui Texture!");
+                    ENGINE_ASSERT(tex->TexID == ImTextureID_Invalid && !tex->BackendUserData, "Invalid ImGui Texture!");
+                    ENGINE_ASSERT(tex->Format == ImTextureFormat_RGBA32, "Invalid ImGui Texture!");
+                    ENGINE_ASSERT(tex->BytesPerPixel == 4, "Invalid ImGui Texture!");
                     
                     std::vector<std::byte> pixels {};
                     auto image_size = static_cast<uint32_t>(tex->Width * tex->Height * 4);
@@ -118,11 +119,11 @@ void ImGuiRenderer::EndFrame(const CommandBuffer &cmd, const ImageAttachment &im
                     continue;
                 }
                 case ImTextureStatus_WantUpdates: {
-                    Assert(tex->Format == ImTextureFormat_RGBA32, "Invalid texture.");
-                    Assert(tex->BytesPerPixel == 4, "Invalid texture.");
+                    ENGINE_ASSERT(tex->Format == ImTextureFormat_RGBA32, "Invalid texture.");
+                    ENGINE_ASSERT(tex->BytesPerPixel == 4, "Invalid texture.");
 
                     auto texture_it = m_textures.find(tex);
-                    Assert(texture_it != m_textures.end(), "Could not find ImGui texture.");
+                    ENGINE_ASSERT(texture_it != m_textures.end(), "Could not find ImGui texture.");
 
                     const auto upload_width = static_cast<uint32_t>(tex->UpdateRect.w);
                     const auto upload_height = static_cast<uint32_t>(tex->UpdateRect.h);

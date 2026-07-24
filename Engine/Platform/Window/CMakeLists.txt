@@ -12,3 +12,7 @@ target_link_libraries(platform_window PUBLIC
     glfw
     imgui
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(platform_window PUBLIC TracyClient)
+endif()

@@ -1,5 +1,6 @@
 #include "VulkanBuffer.h"
 #include "Common.h"
+#include "Core/errors.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "VulkanDevice.h"
@@ -115,10 +116,10 @@ VkDeviceAddress VulkanBuffer::DeviceAddress() const {
 }
 
 void *VulkanBuffer::Mapped() {
-    Assert(m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT,
+    ENGINE_ASSERT(m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT,
         "Cannot map memory of VulkanBuffer without VMA_ALLOCATION_CREATE_MAPPED_BIT set!");
 
-    Assert(m_is_coherent, "Currently does not support user mapping of non-coherent memory!");
+    ENGINE_ASSERT(m_is_coherent, "Currently does not support user mapping of non-coherent memory!");
 
     return m_allocation_info.pMappedData;
 }
@@ -138,7 +139,7 @@ void VulkanBuffer::InvalidateMappedMemory(VkDeviceSize offset, VkDeviceSize size
 }
 
 void VulkanBuffer::Resize(VkDeviceSize size) {
-    Assert(m_initialized, "Cannot resize to un-initialized VulkanBuffer");
+    ENGINE_ASSERT(m_initialized, "Cannot resize to un-initialized VulkanBuffer");
     
     vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
     auto buffer = VulkanBuffer::BufferBuilder(m_device)
@@ -159,17 +160,17 @@ void VulkanBuffer::Resize(VkDeviceSize size) {
 }
 
 void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize offset) {
-    Assert(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
-    Assert(data != nullptr, "Cannot upload from null data.");
-    Assert(offset <= m_size || offset < 0, "Upload offset is outside the buffer.");
-    Assert(bytes <= m_size - offset, "Upload exceeds buffer size.");
+    ENGINE_ASSERT(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
+    ENGINE_ASSERT(data != nullptr, "Cannot upload from null data.");
+    ENGINE_ASSERT(offset <= m_size || offset < 0, "Upload offset is outside the buffer.");
+    ENGINE_ASSERT(bytes <= m_size - offset, "Upload exceeds buffer size.");
 
     const bool mapped = (m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) != 0;
     const bool has_host_access = (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) != 0
         || (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0;
     const bool accepts_transfer = (m_usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) != 0;
 
-    Assert((has_host_access & mapped) || accepts_transfer, "In order to upload data, it must either be mapped or allow for transfers!");
+    ENGINE_ASSERT((has_host_access & mapped) || accepts_transfer, "In order to upload data, it must either be mapped or allow for transfers!");
 
     if (mapped && has_host_access) {
         uint8_t *dst = static_cast<uint8_t *>(m_allocation_info.pMappedData) + offset;
@@ -204,15 +205,15 @@ void VulkanBuffer::Upload(const void *data, VkDeviceSize bytes, VkDeviceSize off
 }
 
 std::vector<std::byte> VulkanBuffer::ReadData(VkDeviceSize bytes, VkDeviceSize offset) {
-    Assert(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
-    Assert(offset <= m_size || offset < 0, "Download offset is outside the buffer.");
-    Assert(bytes <= m_size - offset, "Download exceeds buffer size.");
+    ENGINE_ASSERT(m_initialized, "Cannot upload to un-initialized VulkanBuffer.");
+    ENGINE_ASSERT(offset <= m_size || offset < 0, "Download offset is outside the buffer.");
+    ENGINE_ASSERT(bytes <= m_size - offset, "Download exceeds buffer size.");
     
     const bool mapped = (m_memory_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) != 0;
     const bool has_host_access = (m_memory_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0;
     const bool accepts_transfer = (m_usage & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0;
 
-    Assert((mapped & has_host_access) | accepts_transfer, "In order to download data, it must either be mapped or allow for transfers!");
+    ENGINE_ASSERT((mapped & has_host_access) | accepts_transfer, "In order to download data, it must either be mapped or allow for transfers!");
 
     std::vector<std::byte> result(bytes);
     if (mapped && has_host_access) {

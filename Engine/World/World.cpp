@@ -1,4 +1,5 @@
 #include "World.h"
+#include "Core/Core.h"
 #include "Core/errors.h"
 #include "Entity.h"
 #include "DefaultComponents.h"
@@ -67,8 +68,8 @@ Entity World::CreateEntity(std::string_view name, const Transform &transform) {
         uint32_t slot = m_available_slots.back();
         m_available_slots.pop_back();
 
-        Assert(slot < m_entities.size(), "Entities out of bounds!");
-        Assert(!m_entities[slot].alive, "Cannot take spot of living entity!");
+        ENGINE_ASSERT(slot < m_entities.size(), "Entities out of bounds!");
+        ENGINE_ASSERT(!m_entities[slot].alive, "Cannot take spot of living entity!");
 
         index = slot;
         generation = m_entities[index].generation + 1;
@@ -102,7 +103,7 @@ void World::DestroyEntity(Entity entity, TransformMethod transform_method) {
     if (!entity.IsValid() || !IsAlive(entity))
         return;
 
-    Assert(entity.m_index < m_entities.size(), "Entity out of bounds!");
+    ENGINE_ASSERT(entity.m_index < m_entities.size(), "Entity out of bounds!");
     EntityNode &data = m_entities[entity.m_index];
 
     while (!data.children.empty())
@@ -123,7 +124,7 @@ void World::DestroyEntityTree(Entity entity) {
     if (!entity.IsValid() || !IsAlive(entity))
         return;
 
-    Assert(entity.m_index < m_entities.size(), "Entity out of bounds!");
+    ENGINE_ASSERT(entity.m_index < m_entities.size(), "Entity out of bounds!");
     EntityNode &data = m_entities[entity.m_index];
 
     while (!data.children.empty())
@@ -262,6 +263,8 @@ glm::mat4 World::LocalMatrix(Entity entity) {
 }
 
 glm::mat4 World::GlobalMatrix(Entity entity) {
+    ENGINE_PROFILER_FUNCTION();
+
     return ComputeGlobalTransform(entity);
 }
 
@@ -321,7 +324,7 @@ void World::MarkLocalDirty(Entity entity) {
 }
 
 glm::mat4 World::ComputeLocalTransform(Entity entity) {
-    Assert(IsAlive(entity), "Cannot compute local transformation of non-alive entity");
+    ENGINE_ASSERT(IsAlive(entity), "Cannot compute local transformation of non-alive entity");
     
     DetectTransformChange(entity);
     EntityNode &node = m_entities[entity.m_index];
@@ -339,7 +342,7 @@ glm::mat4 World::ComputeLocalTransform(Entity entity) {
 
 
 glm::mat4 World::ComputeGlobalTransform(Entity entity) {
-    Assert(IsAlive(entity), "Cannot compute local transformation of non-alive entity");
+    ENGINE_ASSERT(IsAlive(entity), "Cannot compute local transformation of non-alive entity");
 
     DetectTransformChange(entity);
 

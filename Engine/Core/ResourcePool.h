@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Handle.h"
+#include "Core/errors.h"
 #include <vector>
 
 template<typename T, typename Tag>
@@ -23,7 +24,7 @@ struct ResourcePool {
             index = available_indices.back();
             available_indices.pop_back();
 
-            Assert(index < data.size(), "Used invalid index in resource pool!");
+            ENGINE_ASSERT(index < data.size(), "Used invalid index in resource pool!");
             data[index] = std::move(record);
         } else {
             index = static_cast<uint32_t>(data.size());
@@ -37,26 +38,26 @@ struct ResourcePool {
     }
     
     T &Get(Handle<Tag> handle) {
-        Assert(handle.Index() < data.size(), "Cannot get resource thats out of range!");
-        Assert(handle.Index() < generations.size(), "Cannot get resource thats out of range!");
-        Assert(handle.Generation() == generations[handle.Index()], "Mismatching generations for resources!");
+        ENGINE_ASSERT(handle.Index() < data.size(), "Cannot get resource thats out of range!");
+        ENGINE_ASSERT(handle.Index() < generations.size(), "Cannot get resource thats out of range!");
+        ENGINE_ASSERT(handle.Generation() == generations[handle.Index()], "Mismatching generations for resources!");
 
         return data[handle.Index()];
     }
 
     const T &Get(Handle<Tag> handle) const {
-        Assert(handle.Index() < data.size(), "Cannot get resource thats out of range!");
-        Assert(handle.Index() < generations.size(), "Cannot get resource thats out of range!");
-        Assert(handle.Generation() == generations[handle.Index()], "Mismatching generations for resources!");
+        ENGINE_ASSERT(handle.Index() < data.size(), "Cannot get resource thats out of range!");
+        ENGINE_ASSERT(handle.Index() < generations.size(), "Cannot get resource thats out of range!");
+        ENGINE_ASSERT(handle.Generation() == generations[handle.Index()], "Mismatching generations for resources!");
 
         return data[handle.Index()];
     }
 
     T TakeOwnership(Handle<Tag> handle) {
         const uint32_t index = handle.Index();
-        Assert(index < data.size(), "Resource index out of range!");
-        Assert(index < generations.size(), "Resource generation index out of range!");
-        Assert(handle.Generation() == generations[index], "Resource generation mismatch!");
+        ENGINE_ASSERT(index < data.size(), "Resource index out of range!");
+        ENGINE_ASSERT(index < generations.size(), "Resource generation index out of range!");
+        ENGINE_ASSERT(handle.Generation() == generations[index], "Resource generation mismatch!");
 
         T resource = std::move(data[index]);
         data[index] = T{};
@@ -64,7 +65,7 @@ struct ResourcePool {
         ++generations[index];
         available_indices.push_back(index);
 
-        Assert(m_num_objects > 0, "Resource pool count underflow!");
+        ENGINE_ASSERT(m_num_objects > 0, "Resource pool count underflow!");
         --m_num_objects;
 
         return resource;

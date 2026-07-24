@@ -51,12 +51,12 @@ std::tuple<glm::vec3, glm::quat, glm::vec3> GLTFModel::Node::CalculateTRS() cons
 // =========================== //
 
 GLTFModel::AnimationOutput GLTFModel::AnimationSampler::Sample(float current_time) const {
-    Assert(!times.empty(), "Cannot sample invalid animation!");
+    ENGINE_ASSERT(!times.empty(), "Cannot sample invalid animation!");
 
     if (interpolation_method == AnimationInterpolation::CubicSpline) {
-        Assert(output.size() == 3 * times.size(), "Mismatching timestamps!");
+        ENGINE_ASSERT(output.size() == 3 * times.size(), "Mismatching timestamps!");
     } else {
-        Assert(output.size() == times.size(), "Mismatching timestamps!");
+        ENGINE_ASSERT(output.size() == times.size(), "Mismatching timestamps!");
     }
 
     const auto value_at = [&](size_t key) -> const AnimationOutput & {
@@ -193,7 +193,7 @@ GLTFModel::GLTFModel(AssetManager &asset_manager, const std::filesystem::path &f
     if (!errors.empty())
         throw std::runtime_error("GLTF Error: " + errors);
 
-    Assert(model.scenes.size() >= 1, "There are no scenes!");
+    ENGINE_ASSERT(model.scenes.size() >= 1, "There are no scenes!");
     const tinygltf::Scene &scene = model.scenes[model.defaultScene == -1 ? 0 : model.defaultScene];
 
     LoadMaterials(model);
@@ -248,7 +248,7 @@ GLTFModel::~GLTFModel() {
 //     }
 
 //     for (const AnimationChannel &channel : animation.channels) {
-//         Assert(channel.sampler_index < animation.samplers.size(), "Invalid animation sampler!");
+//         ENGINE_ASSERT(channel.sampler_index < animation.samplers.size(), "Invalid animation sampler!");
 
 //         const AnimationSampler &sampler = animation.samplers[channel.sampler_index];
 
@@ -343,7 +343,7 @@ const VulkanBuffer &GLTFModel::IndexBuffer() const {
 }
 
 const GLTFModel::Node &GLTFModel::GetNode(uint32_t index) const {
-    Assert(index < m_linear_nodes.size() && m_linear_nodes[index], "Invalid GLTF node!");
+    ENGINE_ASSERT(index < m_linear_nodes.size() && m_linear_nodes[index], "Invalid GLTF node!");
     return *m_linear_nodes[index];
 }
 
@@ -477,9 +477,9 @@ void GLTFModel::LoadMaterials(tinygltf::Model &model) {
 
         tinygltf::Image &image = model.images[texture.source];
 
-        Assert(image.component == 4, "Only RGBA images are supported!");
-        Assert(image.bits == 8, "Only 8-bit images are supported!");
-        Assert(image.pixel_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, "Only unsigned byte images are supported!");
+        ENGINE_ASSERT(image.component == 4, "Only RGBA images are supported!");
+        ENGINE_ASSERT(image.bits == 8, "Only 8-bit images are supported!");
+        ENGINE_ASSERT(image.pixel_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, "Only unsigned byte images are supported!");
 
         const auto create_image = [&](TextureFormat format, const std::string &debug_tag) -> TextureHandle {
             std::string debug_name = image.name.empty() ? std::format("GLTF Image [{}]", texture.source) : image.name;
@@ -642,7 +642,7 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
         Mesh constructed_mesh {};
         
         for (tinygltf::Primitive &primitive : mesh.primitives) {
-            Assert(primitive.mode == TINYGLTF_MODE_TRIANGLES, "We currently only support triangle primitives!");
+            ENGINE_ASSERT(primitive.mode == TINYGLTF_MODE_TRIANGLES, "We currently only support triangle primitives!");
             
             std::vector<MeshVertex> primitive_vertices;
             std::vector<uint32_t> primitive_indices;
@@ -677,7 +677,7 @@ void GLTFModel::LoadNode(Node *parent, uint32_t node_index, tinygltf::Model &mod
 
             //// Positions ////
             {
-                Assert(primitive.attributes.contains("POSITION"), "Cannot generate a GLTF mesh without positions!");
+                ENGINE_ASSERT(primitive.attributes.contains("POSITION"), "Cannot generate a GLTF mesh without positions!");
                 tinygltf::Accessor &position_accessor = model.accessors[primitive.attributes["POSITION"]];
                 primitive_vertices.resize(primitive_vertices.size() + position_accessor.count);
 
@@ -1431,7 +1431,7 @@ VkSamplerAddressMode GLTFModel::GetVulkanWrapMode(int wrap_mode) {
             return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
 
         default:
-            Assert(false, "Invalid glTF texture wrap mode");
+            ENGINE_ASSERT(false, "Invalid glTF texture wrap mode");
             return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
 }

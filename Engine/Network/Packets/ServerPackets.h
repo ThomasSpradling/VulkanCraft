@@ -44,7 +44,7 @@ public:
 public:
     virtual void SerializeData(NetworkBuffer &buffer) const override {
         buffer.Write(count);
-        Assert(data.size() == count, "Size mismatch in writing server packet PacketState");
+        ENGINE_ASSERT(data.size() == count, "Size mismatch in writing server packet PacketState");
 
         for (uint32_t i = 0; i < count; ++i) {
             buffer.Write(data[i].id);

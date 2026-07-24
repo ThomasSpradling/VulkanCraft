@@ -8,7 +8,6 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include <vulkan/vulkan_core.h>
 
-
 #include <vk_mem_alloc.h>
 
 #include "Core/errors.h"
@@ -19,6 +18,20 @@
         throw std::runtime_error(str);                                                                              \
     }
 
+#if defined(ENGINE_ENABLE_PROFILING) && defined(ENGINE_ENABLE_GPU_PROFILING)
+    #define TRACY_VK_USE_SYMBOL_TABLE
+    #include <tracy/TracyVulkan.hpp>
+
+    #define ENGINE_PROFILER_GPU_ZONE(device, command_buffer, name, color)         \
+        TracyVkZoneC(device.TracyContext(), command_buffer.Handle(), name, color)
+
+    #define ENGINE_PROFILER_GPU_COLLECT(device, command_buffer)     \
+        TracyVkCollect(device.TracyContext(), command_buffer.Handle())
+
+#else
+    #define ENGINE_PROFILER_GPU_ZONE(device, command_buffer, name)
+    #define ENGINE_PROFILER_GPU_COLLECT(device, command_buffer)
+#endif // ENGINE_ENABLE_PROFILING
 
 // ======================== //
 // ---- Vulkan Objects ---- //

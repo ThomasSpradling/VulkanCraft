@@ -16,7 +16,7 @@ add_library(platform_graphics STATIC
     VmaImplementation.cpp
 )
 
-target_link_libraries(platform_graphics
+target_link_libraries(platform_graphics PUBLIC
     engine_options
     engine_includes
     engine_definitions
@@ -26,3 +26,7 @@ target_link_libraries(platform_graphics
     volk::volk
     GPUOpen::VulkanMemoryAllocator
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(platform_graphics PUBLIC TracyClient)
+endif()

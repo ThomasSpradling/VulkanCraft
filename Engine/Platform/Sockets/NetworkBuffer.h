@@ -5,9 +5,6 @@
 #include <glm/glm.hpp>
 #include "Core/errors.h"
 
-static_assert(sizeof(float) == sizeof(uint32_t), "NetworkBuffer assumes 32-bit floats.");
-static_assert(std::numeric_limits<float>::is_iec559);
-
 class NetworkBuffer {
 public:
     NetworkBuffer() = default;
@@ -51,8 +48,8 @@ public:
     
     template <uint16_t MaxByteCount>
     std::array<uint8_t, MaxByteCount> ReadBytes(const uint16_t byte_count) {
-        Assert(byte_count <= MaxByteCount, "Byte count out of bounds!");
-        Assert(m_offset + byte_count <= m_data.size(), "Failed to read byte from this buffer!");
+        ENGINE_ASSERT(byte_count <= MaxByteCount, "Byte count out of bounds!");
+        ENGINE_ASSERT(m_offset + byte_count <= m_data.size(), "Failed to read byte from this buffer!");
         std::array<uint8_t, MaxByteCount> result {};
         std::copy_n(
             m_data.begin() + m_offset,

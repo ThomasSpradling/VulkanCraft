@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include "Core/errors.h"
 #include "Packets/SystemPackets.h"
 #include "Protocol.h"
 
@@ -24,7 +25,7 @@ NetworkBuffer Packet::Serialize() const {
 }
 
 std::unique_ptr<Packet> Packet::Deserialize(NetworkBuffer &buffer) {
-    Assert(buffer.GetSize() >= PACKET_DATA_BEGIN + PACKET_DATA_END, "Invalid packet!");
+    ENGINE_ASSERT(buffer.GetSize() >= PACKET_DATA_BEGIN + PACKET_DATA_END, "Invalid packet!");
     uint32_t packet_data_size = buffer.GetSize() - PACKET_DATA_BEGIN - PACKET_DATA_END + 1;
     uint32_t received_checksum = buffer.ReadInteger();
     uint8_t channel = buffer.ReadByte();

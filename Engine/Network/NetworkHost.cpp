@@ -28,7 +28,7 @@ NetworkHost::NetworkHost(HostType type, std::unique_ptr<ISocket> socket, uint32_
         m_peers.back().peer_id = i;
     }
 
-    Assert(max_peers > 0, "Must have positive number of peers!");
+    ENGINE_ASSERT(max_peers > 0, "Must have positive number of peers!");
 }
 
 NetworkHost::NetworkHost(HostType type, std::unique_ptr<ISocket> socket, const NetworkAddress &address, uint32_t max_peers, uint8_t max_channels)
@@ -72,7 +72,7 @@ std::optional<PeerId> NetworkHost::Connect(const NetworkAddress &address, double
 }
 
 void NetworkHost::Disconnect(PeerId peer_id, double max_wait_time) {
-    Assert(peer_id < m_max_peers, std::format("Disconnect: Invalid peer ID {}. The maximum number of peers is {}.", peer_id, m_max_peers));
+    ENGINE_ASSERT(peer_id < m_max_peers, std::format("Disconnect: Invalid peer ID {}. The maximum number of peers is {}.", peer_id, m_max_peers));
     NetworkPeer &peer = m_peers[peer_id];
     if (peer.status != PeerStatus::Connected)
         return;
@@ -91,7 +91,7 @@ void NetworkHost::Disconnect(PeerId peer_id, double max_wait_time) {
 }
 
 void NetworkHost::SendPacket(const NetworkAddress &address, std::unique_ptr<Packet> packet) {
-    Assert(packet->GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Cannot send large packets to unknown address!");
+    ENGINE_ASSERT(packet->GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Cannot send large packets to unknown address!");
     m_outgoing_packet_queue.emplace(address, std::move(packet));
 }
 
@@ -143,7 +143,7 @@ bool NetworkHost::PollNetworkCommand(NetworkCommand &command) {
 }
 
 void NetworkHost::ValidatePeer(PeerId peer_id) const {
-    Assert(peer_id < m_max_peers, std::format("Invalid peer ID {}. The maximum number of peers is {}.", peer_id, m_max_peers));
+    ENGINE_ASSERT(peer_id < m_max_peers, std::format("Invalid peer ID {}. The maximum number of peers is {}.", peer_id, m_max_peers));
 }
 
 void NetworkHost::ReceivePackets() {
@@ -161,7 +161,7 @@ void NetworkHost::ReceivePackets() {
 
         std::unique_ptr<Packet> packet = Packet::Deserialize(data);
         ChannelId channel_id = packet->channel_id;
-        Assert(channel_id < m_max_channels, "Packet Received: Invalid channel ID!");
+        ENGINE_ASSERT(channel_id < m_max_channels, "Packet Received: Invalid channel ID!");
 
         if (!packet)
             continue;
@@ -290,8 +290,8 @@ void NetworkHost::FlushPackets(double delta_time) {
             peer.outgoing_packet_queue.pop();
     
             packet_bytes += packet->GetSize();
-            Assert(packet_bytes <= packet_byte_budget, std::format("Went over budget for Peer {}!", peer_id));
-            Assert(packet->GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Packet too large to send!");
+            ENGINE_ASSERT(packet_bytes <= packet_byte_budget, std::format("Went over budget for Peer {}!", peer_id));
+            ENGINE_ASSERT(packet->GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Packet too large to send!");
 
             m_socket->SendTo(peer.address, packet->Serialize());
         }
@@ -330,7 +330,7 @@ std::vector<std::unique_ptr<Packet>> NetworkHost::SplitIntoFragments(const Packe
 
     const int header_footer_size = PACKET_DATA_BEGIN + PACKET_DATA_END;
     int remaining_packet_bytes = static_cast<int>(buffer.GetSize()) - header_footer_size;
-    Assert(remaining_packet_bytes >= 0, "There must be more packet bytes than the header size.");
+    ENGINE_ASSERT(remaining_packet_bytes >= 0, "There must be more packet bytes than the header size.");
     auto fragment_count = static_cast<uint8_t>(std::floor(remaining_packet_bytes / MAX_PACKET_FRAGMENT_SIZE));
     if (buffer.RemainingBytes() % MAX_PACKET_FRAGMENT_SIZE != 0)
         fragment_count++;

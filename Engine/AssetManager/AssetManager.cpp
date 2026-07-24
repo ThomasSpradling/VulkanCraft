@@ -2,7 +2,9 @@
 #include "AssetManager/Texture.h"
 #include "Bitmap.h"
 #include "Buffer.h"
+#include "Core/Core.h"
 #include "Core/Handle.h"
+#include "Core/errors.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include "Platform/Graphics/Common.h"
 #include "Platform/Graphics/VulkanBuffer.h"
@@ -278,7 +280,7 @@ TextureHandle AssetManager::LoadTextureCubeFromEquirectangular(const std::filesy
         using BitmapType = Bitmap<Format, ChannelCount>;
 
         BitmapType bitmap = BitmapType::Load(path);
-        Assert((bitmap.Width() % 4) == 0 || bitmap.Width() / 2 == bitmap.Height(), "Invalid cube map!");
+        ENGINE_ASSERT((bitmap.Width() % 4) == 0 || bitmap.Width() / 2 == bitmap.Height(), "Invalid cube map!");
         auto faces = ConvertEquirectangularToCubeMap(bitmap);
 
         const uint32_t face_size = faces.front().Width();
@@ -335,7 +337,7 @@ TextureHandle AssetManager::LoadTextureCubeFromEquirectangular(const std::filesy
 
 TextureHandle AssetManager::CreateTexture(const Texture &texture) {
     bool is_cube_map = false;
-    Assert(texture.layers > 0, "A texture must have at least one layer!");
+    ENGINE_ASSERT(texture.layers > 0, "A texture must have at least one layer!");
 
     auto gpu_texture_builder = VulkanImage::ImageBuilder(m_device)
         .Format(GetVulkanFormat(texture.format))
@@ -350,12 +352,12 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
             }
             break;
         case ImageType::Image3D:
-            Assert(texture.layers == 1, "Currently we only support 3D textures with one layer.");
+            ENGINE_ASSERT(texture.layers == 1, "Currently we only support 3D textures with one layer.");
             gpu_texture_builder.Image3D(texture.extent.x, texture.extent.y, texture.extent.z);
             break;
         case ImageType::ImageCube:
-            Assert(texture.layers % 6 == 0, "A cube map must have a multiple of six layers!");
-            Assert(texture.extent.x == texture.extent.y, "A cube map must have equal side lengths!");
+            ENGINE_ASSERT(texture.layers % 6 == 0, "A cube map must have a multiple of six layers!");
+            ENGINE_ASSERT(texture.extent.x == texture.extent.y, "A cube map must have equal side lengths!");
             is_cube_map = true;
             if (texture.layers == 6) {
                 gpu_texture_builder.CubeMap(texture.extent.x);
@@ -379,6 +381,9 @@ TextureHandle AssetManager::CreateTexture(const Texture &texture) {
     }, texture.pixels.data(), sizeof(std::byte) * texture.extent.x);
 
     m_device.ImmediateSubmit(QueueType::Graphics, [&](const CommandBuffer &cmd) {
+        ENGINE_PROFILER_FUNCTION();
+        ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Create Texture", 0xFFFFFF);
+
         if (texture.generate_mipmaps) {
             cmd.GenerateMipMaps(*gpu_texture, VK_FILTER_LINEAR);
         }
@@ -479,7 +484,7 @@ void AssetManager::DestroyBuffer(BufferHandle handle) {
 }
 
 std::pair<TextureId, std::reference_wrapper<VulkanImage>> AssetManager::GetTexture(TextureHandle texture) {
-    Assert(texture != TextureHandle::Invalid(), "Must have valid texture handle!");
+    ENGINE_ASSERT(texture != TextureHandle::Invalid(), "Must have valid texture handle!");
 
     TextureRecord record = m_textures.Get(texture);
     if (record.cube_texture_id != 0) {

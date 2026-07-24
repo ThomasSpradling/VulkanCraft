@@ -19,19 +19,16 @@
     #define ENGINE_PROFILER_FUNCTION() ZoneScoped
     #define ENGINE_PROFILER_FUNCTION_COLOR(color) ZoneScopedC(color)
 
-    #define ENGINE_PROFILER_ZONE(name, color) { \
-        ZoneScopedC(color);                     \
-        ZoneName(name, strlen(name));
-
-    #define ENGINE_PROFILER_ZONE_END() }
+    #define ENGINE_PROFILER_ZONE(name, color) \
+        ZoneScopedC(color);                   \
+        ZoneName(name, strlen(name))
 
     #define ENGINE_PROFILER_THREAD(name) tracy::SetThreadName(name);
-    #define ENGINE_PROFILER_FRAME(name) FrameMarkNamed(name);
+    #define ENGINE_PROFILER_FRAME() FrameMark;
 #else
     #define ENGINE_PROFILER_FUNCTION()
     #define ENGINE_PROFILER_FUNCTION_COLOR(color)
-    #define ENGINE_PROFILER_ZONE(name, color) {
-    #define ENGINE_PROFILER_ZONE_END() }
+    #define ENGINE_PROFILER_ZONE(name, color)
     #define ENGINE_PROFILER_THREAD(name)
     #define ENGINE_PROFILER_FRAME(name)
 #endif // ENGINE_ENABLE_PROFILING

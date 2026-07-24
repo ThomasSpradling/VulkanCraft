@@ -16,3 +16,7 @@ target_link_libraries(platform_sockets PUBLIC
 if (WIN32)
     target_link_libraries(platform_sockets PUBLIC ws2_32)
 endif()
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(platform_sockets PUBLIC TracyClient)
+endif()

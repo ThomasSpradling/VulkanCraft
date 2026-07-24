@@ -144,3 +144,8 @@ target_link_libraries(imgui PUBLIC
     glfw
     volk::volk
 )
+
+# Tracy
+
+set(TRACY_ENABLE ${ENGINE_ENABLE_TRACY_PROFILING} CACHE BOOL "Enable Tracy profiler instrumentation" FORCE)
+add_subdirectory(tracy)

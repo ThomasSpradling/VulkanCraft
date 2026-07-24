@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Core.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
 #include "Entity.h"
@@ -53,7 +54,7 @@ public:
 
     template<typename Component, typename... Args>
     Component &Add(Entity entity, Args &&...args) {
-        Assert(IsAlive(entity), "Cannot add a component to a non-alive entity!");
+        ENGINE_ASSERT(IsAlive(entity), "Cannot add a component to a non-alive entity!");
 
         auto type_id = std::type_index(typeid(Component));
         if (!m_component_storage.contains(type_id)) {
@@ -76,43 +77,43 @@ public:
 
     template<typename Component>
     bool Has(Entity entity) const {
-        if (!IsAlive(entity))
-            return false;
-
-        auto type_id = std::type_index(typeid(Component));
-        if (!m_component_storage.contains(type_id))
-            return false;
-
-        auto *component_storage = static_cast<ComponentStorage<Component> *>(m_component_storage.at(type_id).get());
-        return component_storage->Has(entity);
+        return TryGet<Component>(entity) != nullptr;
     }
 
     template<typename Component>
     Component &Get(Entity entity) {
-        Assert(Has<Component>(entity), "Component not present!");
+        ENGINE_PROFILER_FUNCTION();
 
-        auto type_id = std::type_index(typeid(Component));
-        auto *component_storage = static_cast<ComponentStorage<Component> *>(m_component_storage[type_id].get());
-        return component_storage->Get(entity);
+        Component *component = TryGet<Component>(entity);
+        ENGINE_ASSERT(component != nullptr, "Component not present!");
+        return *component;
     }
 
     template<typename Component>
     const Component &Get(Entity entity) const {
-        Assert(Has<Component>(entity), "Component not present!");
+        ENGINE_PROFILER_FUNCTION();
 
-        auto type_id = std::type_index(typeid(Component));
-        auto *component_storage = static_cast<ComponentStorage<Component> *>(m_component_storage.at(type_id).get());
-        return component_storage->Get(entity);
+        const Component *component = TryGet<Component>(entity);
+        ENGINE_ASSERT(component != nullptr, "Component not present!");
+        return *component;
     }
 
     template<typename Component>
     Component *TryGet(Entity entity) {
-        return Has<Component>(entity) ? &Get<Component>(entity) : nullptr;
+        if (!IsAlive(entity))
+            return nullptr;
+
+        ComponentStorage<Component> *storage = FindStorage<Component>();
+        return storage ? storage->TryGet(entity) : nullptr;
     }
 
     template<typename Component>
     const Component *TryGet(Entity entity) const {
-        return Has<Component>(entity) ? &Get<Component>(entity) : nullptr;
+        if (!IsAlive(entity))
+            return nullptr;
+
+        const ComponentStorage<Component> *storage = FindStorage<Component>();
+        return storage ? storage->TryGet(entity) : nullptr;
     }
 
     template<typename Component>
@@ -194,13 +195,7 @@ private:
         static const uint32_t InvalidIndex = std::numeric_limits<uint32_t>::max();
                 
         bool Has(Entity entity) const {
-            if (entity.m_index >= indices.size() || !entity.IsValid())
-                return false;
-
-            uint32_t index = indices[entity.m_index];
-            return index != InvalidIndex
-                && index < components.size()
-                && entity == entities[index];
+            return TryGet(entity) != nullptr;
         }
 
         template<typename... Args>
@@ -243,22 +238,36 @@ private:
             indices[entity.m_index] = InvalidIndex;
         }
 
-        Component &Get(Entity entity) {
-            Assert(Has(entity), "Component not present!");
+        Component &Get(Entity entity) noexcept {
             return components[indices[entity.m_index]];
         }
 
-        const Component &Get(Entity entity) const {
-            Assert(Has(entity), "Component not present!");
+        const Component &Get(Entity entity) const noexcept {
             return components[indices[entity.m_index]];
         }
 
         Component *TryGet(Entity entity) {
-            return Has(entity) ? &Get(entity) : nullptr;
+            if (!entity.IsValid() || entity.m_index >= indices.size())
+                return nullptr;
+
+            const uint32_t index = indices[entity.m_index];
+            if (index == InvalidIndex || index >= components.size() || entities[index] != entity) {
+                return nullptr;
+            }
+
+            return &components[index];
         }
 
         const Component *TryGet(Entity entity) const {
-            return Has(entity) ? &Get(entity) : nullptr;
+            if (!entity.IsValid() || entity.m_index >= indices.size())
+                return nullptr;
+
+            const uint32_t index = indices[entity.m_index];
+            if (index == InvalidIndex || index >= components.size() || entities[index] != entity) {
+                return nullptr;
+            }
+
+            return &components[index];
         }
     };
 private:
@@ -274,4 +283,22 @@ private:
     glm::mat4 ComputeLocalTransform(Entity entity);
     glm::mat4 ComputeGlobalTransform(Entity entity);
     void Update(Entity entity);
+
+    template<typename Component>
+    ComponentStorage<Component> *FindStorage() noexcept {
+        const auto it = m_component_storage.find(std::type_index(typeid(Component)));
+        if (it == m_component_storage.end())
+            return nullptr;
+
+        return static_cast<ComponentStorage<Component>*>(it->second.get());
+    }
+
+    template<typename Component>
+    const ComponentStorage<Component> *FindStorage() const noexcept {
+        const auto it = m_component_storage.find(std::type_index(typeid(Component)));
+        if (it == m_component_storage.end())
+            return nullptr;
+
+        return static_cast<const ComponentStorage<Component>*>(it->second.get());
+    }
 };

@@ -1,4 +1,5 @@
 #include "GarbageCollector.h"
+#include "Core/Core.h"
 
 GarbageCollector::GarbageCollector(uint32_t frames_in_flight) {
     m_queues.resize(frames_in_flight);
@@ -13,6 +14,8 @@ void GarbageCollector::Enqueue(std::packaged_task<void()> task) {
 }
 
 void GarbageCollector::Collect(uint32_t current_frame) {
+    ENGINE_PROFILER_FUNCTION();
+
     auto &queue = m_queues[current_frame];
     for (auto &task : queue) {
         task();

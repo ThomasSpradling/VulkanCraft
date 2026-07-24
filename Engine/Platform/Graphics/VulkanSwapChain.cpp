@@ -1,4 +1,6 @@
 #include "VulkanSwapChain.h"
+#include "Core/Core.h"
+#include "Core/errors.h"
 #include "VulkanDevice.h"
 #include "VulkanImage.h"
 
@@ -43,6 +45,8 @@ std::optional<uint32_t> VulkanSwapChain::AcquireNextImage(VkFence signal_fence, 
 }
 
 bool VulkanSwapChain::Present(std::span<VkSemaphore> wait_semaphores) {
+    ENGINE_PROFILER_FUNCTION_COLOR(EngineProfilerColor_Present);
+
     std::vector<uint32_t> image_index = { m_current_swapchain_image };
     VkPresentInfoKHR present_info {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -86,7 +90,7 @@ void VulkanSwapChain::CreateSwapChain() {
     {
         uint32_t surface_formats_count = 0;
         VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_device.PhysicalDevice(), m_device.Surface(), &surface_formats_count, nullptr));
-        Assert(surface_formats_count > 0, "Cannot find any surface formats.", __FILE__, __LINE__);
+        ENGINE_ASSERT(surface_formats_count > 0, "Cannot find any surface formats.");
 
         std::vector<VkSurfaceFormatKHR> surface_formats(surface_formats_count);
         VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_device.PhysicalDevice(), m_device.Surface(), &surface_formats_count, surface_formats.data()));
@@ -113,7 +117,7 @@ void VulkanSwapChain::CreateSwapChain() {
     {
         uint32_t present_modes_count = 0;
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_device.PhysicalDevice(), m_device.Surface(), &present_modes_count, nullptr));
-        Assert(present_modes_count > 0, "Cannot find any present modes.", __FILE__, __LINE__);
+        ENGINE_ASSERT(present_modes_count > 0, "Cannot find any present modes.");
 
     
         std::vector<VkPresentModeKHR> present_modes(present_modes_count);
@@ -211,9 +215,9 @@ void VulkanSwapChain::CreateSwapChain() {
         .oldSwapchain = old_swapchain,
     };
 
-    Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Surface does not support TRANSFER_SRC", __FILE__, __LINE__);
-    Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Surface does not support TRANSFER_DST", __FILE__, __LINE__);
-    Assert(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, "Surface does not support COLOR_ATTACHMENT", __FILE__, __LINE__);
+    ENGINE_ASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Surface does not support TRANSFER_SRC");
+    ENGINE_ASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Surface does not support TRANSFER_DST");
+    ENGINE_ASSERT(surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, "Surface does not support COLOR_ATTACHMENT");
 
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;

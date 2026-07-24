@@ -1,5 +1,7 @@
 #include "CommandBuffer.h"
 #include "Common.h"
+#include "Core/Core.h"
+#include "Core/errors.h"
 #include "VulkanObjects.h"
 #include "VulkanDevice.h"
 #include "VulkanImage.h"
@@ -60,7 +62,7 @@ ImageBarrier &ImageBarrier::SourceLayout(VkImageLayout source_layout) {
 }
 
 ImageBarrier &ImageBarrier::TransitionLayout(VkImageLayout new_layout) {
-    Assert(new_layout != VK_IMAGE_LAYOUT_UNDEFINED, "An image cannot be transitioned into LAYOUT_UNDEFINED!");
+    ENGINE_ASSERT(new_layout != VK_IMAGE_LAYOUT_UNDEFINED, "An image cannot be transitioned into LAYOUT_UNDEFINED!");
 
     m_new_layout = new_layout;
     return *this;
@@ -296,7 +298,7 @@ void CommandBuffer::SetScissors(glm::ivec2 offset, glm::uvec2 extent) const {
 }
 
 void CommandBuffer::CopyImage(const VulkanImage &src, const VulkanImage &dst) const {
-    Assert(src.Extent().width == dst.Extent().width
+    ENGINE_ASSERT(src.Extent().width == dst.Extent().width
         && src.Extent().height == dst.Extent().height
         && src.Extent().depth == dst.Extent().depth, "Cannot copy images of different extents!");
     VkImageCopy region {
@@ -411,10 +413,10 @@ void CommandBuffer::TransitionLayout(VulkanImage &image, VkImageLayout target_la
 
 
 void CommandBuffer::GenerateMipMaps(VulkanImage &image, VkFilter filter, uint32_t layer) const {
-    Assert(image.MipLevels() > 1, "Should not generate mipmaps with just one mip level.");
-    Assert(image.SampleCount() == 1u, "Cannot generate mipmaps for multi-sampled image!");
-    Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
-    Assert(image.Usage() & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Cannot generate mipmaps for image without usage TRANSFER_DST_BIT!");
+    ENGINE_ASSERT(image.MipLevels() > 1, "Should not generate mipmaps with just one mip level.");
+    ENGINE_ASSERT(image.SampleCount() == 1u, "Cannot generate mipmaps for multi-sampled image!");
+    ENGINE_ASSERT(image.Usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT, "Cannot generate mipmaps for image without usage TRANSFER_SRC_BIT!");
+    ENGINE_ASSERT(image.Usage() & VK_IMAGE_USAGE_TRANSFER_DST_BIT, "Cannot generate mipmaps for image without usage TRANSFER_DST_BIT!");
     
     const VkImageLayout old_layout = image.Layout();
     const VkExtent3D &extent = image.Extent();

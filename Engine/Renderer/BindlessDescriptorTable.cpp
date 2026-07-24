@@ -1,4 +1,5 @@
 #include "BindlessDescriptorTable.h"
+#include "Core/errors.h"
 #include "Platform/Graphics/CommandBuffer.h"
 #include <iostream>
 
@@ -86,7 +87,7 @@ BindlessDescriptorTable::BindlessDescriptorTable(const VulkanDevice &device)
     };
 
     vkGetDescriptorSetLayoutSupport(m_device.Device(), &layout_info, &support);
-    Assert(support.supported == VK_TRUE, "Global descriptor set layout is not supported");
+    ENGINE_ASSERT(support.supported == VK_TRUE, "Global descriptor set layout is not supported");
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device.Device(), &layout_info, nullptr, &m_global_descriptor_layout));
 
@@ -220,33 +221,33 @@ AccelerationStructureId BindlessDescriptorTable::AddAccelerationStructure(VkAcce
 }
 
 VulkanImage &BindlessDescriptorTable::GetTexture(TextureId id) {
-    Assert(id < MaxTextures && m_textures[id], "Invalid texture ID");
+    ENGINE_ASSERT(id < MaxTextures && m_textures[id], "Invalid texture ID");
     return *m_textures[id];
 }
 
 VulkanImage &BindlessDescriptorTable::GetTextureCube(TextureId id) {
-    Assert(id < MaxCubeTextures && m_cube_textures[id], "Invalid texture ID");
+    ENGINE_ASSERT(id < MaxCubeTextures && m_cube_textures[id], "Invalid texture ID");
     return *m_cube_textures[id];
 }
 
 VkSampler BindlessDescriptorTable::GetSampler(SamplerId id) {
-    Assert(id < MaxSamplers && m_samplers[id], "Invalid sampler ID");
+    ENGINE_ASSERT(id < MaxSamplers && m_samplers[id], "Invalid sampler ID");
     return m_samplers[id];
 }
 
 VulkanImage &BindlessDescriptorTable::GetStorageImage(StorageImageId id) {
-    Assert(id < MaxStorageImages && m_storage_images[id], "Invalid storage image ID");
+    ENGINE_ASSERT(id < MaxStorageImages && m_storage_images[id], "Invalid storage image ID");
     return *m_storage_images[id];
 }
 
 VkAccelerationStructureKHR BindlessDescriptorTable::GetAccelerationStructure(AccelerationStructureId id) {
-    Assert(id < MaxAccelerationStructures && m_acceleration_structures[id] != VK_NULL_HANDLE, "Invalid acceleration structure ID");
+    ENGINE_ASSERT(id < MaxAccelerationStructures && m_acceleration_structures[id] != VK_NULL_HANDLE, "Invalid acceleration structure ID");
     return m_acceleration_structures[id];
 }
 
 void BindlessDescriptorTable::RemoveTexture(TextureId id) {
-    Assert(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
-    Assert(m_textures[id], "Texture slot is empty");
+    ENGINE_ASSERT(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
+    ENGINE_ASSERT(m_textures[id], "Texture slot is empty");
 
     WriteTexture(id, *m_textures[DefaultTextureId]);
     m_textures[id].reset();
@@ -254,8 +255,8 @@ void BindlessDescriptorTable::RemoveTexture(TextureId id) {
 }
 
 void BindlessDescriptorTable::RemoveTextureCube(TextureId id) {
-    Assert(id > DefaultCubeTextureId && id < MaxCubeTextures, "Invalid texture ID");
-    Assert(m_cube_textures[id], "Texture slot is empty");
+    ENGINE_ASSERT(id > DefaultCubeTextureId && id < MaxCubeTextures, "Invalid texture ID");
+    ENGINE_ASSERT(m_cube_textures[id], "Texture slot is empty");
 
     WriteTextureCube(id, *m_cube_textures[DefaultTextureId]);
     m_cube_textures[id].reset();
@@ -263,8 +264,8 @@ void BindlessDescriptorTable::RemoveTextureCube(TextureId id) {
 }
 
 void BindlessDescriptorTable::RemoveSampler(SamplerId id) {
-    Assert(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
-    Assert(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
+    ENGINE_ASSERT(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
+    ENGINE_ASSERT(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
 
     WriteSampler(id, m_samplers[DefaultSamplerId]);
     vkDestroySampler(m_device.Device(), m_samplers[id], nullptr);
@@ -273,18 +274,18 @@ void BindlessDescriptorTable::RemoveSampler(SamplerId id) {
 }
 
 void BindlessDescriptorTable::ReplaceTexture(TextureId id, std::unique_ptr<VulkanImage> image) {
-    Assert(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
-    Assert(m_textures[id], "Texture slot is empty");
-    Assert(image, "Cannot replace a texture with null");
+    ENGINE_ASSERT(id > DefaultTextureId && id < MaxTextures, "Invalid texture ID");
+    ENGINE_ASSERT(m_textures[id], "Texture slot is empty");
+    ENGINE_ASSERT(image, "Cannot replace a texture with null");
 
     WriteTexture(id, *image);
     m_textures[id] = std::move(image);
 }
 
 void BindlessDescriptorTable::ReplaceSampler(SamplerId id, VkSampler sampler) {
-    Assert(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
-    Assert(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
-    Assert(sampler != VK_NULL_HANDLE, "Cannot replace a sampler with null");
+    ENGINE_ASSERT(id > DefaultSamplerId && id < MaxSamplers, "Invalid sampler ID");
+    ENGINE_ASSERT(m_samplers[id] != VK_NULL_HANDLE, "Sampler slot is empty");
+    ENGINE_ASSERT(sampler != VK_NULL_HANDLE, "Cannot replace a sampler with null");
 
     WriteSampler(id, sampler);
     vkDestroySampler(m_device.Device(), m_samplers[id], nullptr);
@@ -292,9 +293,9 @@ void BindlessDescriptorTable::ReplaceSampler(SamplerId id, VkSampler sampler) {
 }
 
 void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &image) {
-    Assert(id < MaxTextures, "Invalid texture ID!");
-    // Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
-    Assert((image.Usage() & VK_IMAGE_USAGE_SAMPLED_BIT) | (image.Usage() & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT), "Image usage must include either SAMPLED or INPUT_ATTACHMENT to write to descriptor set!");
+    ENGINE_ASSERT(id < MaxTextures, "Invalid texture ID!");
+    // ENGINE_ASSERT(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
+    ENGINE_ASSERT((image.Usage() & VK_IMAGE_USAGE_SAMPLED_BIT) | (image.Usage() & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT), "Image usage must include either SAMPLED or INPUT_ATTACHMENT to write to descriptor set!");
     
     VkDescriptorImageInfo image_info {
         .sampler = VK_NULL_HANDLE,
@@ -316,8 +317,8 @@ void BindlessDescriptorTable::WriteTexture(TextureId id, const VulkanImage &imag
 }
 
 void BindlessDescriptorTable::WriteTextureCube(TextureId id, const VulkanImage &image) {
-    Assert(id < MaxTextures, "Invalid texture ID!");
-    Assert(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
+    ENGINE_ASSERT(id < MaxTextures, "Invalid texture ID!");
+    ENGINE_ASSERT(image.Layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, "Cannot write to texture without SHADER_READ_ONLY layout!");
     
     VkDescriptorImageInfo image_info {
         .sampler = VK_NULL_HANDLE,
@@ -339,8 +340,8 @@ void BindlessDescriptorTable::WriteTextureCube(TextureId id, const VulkanImage &
 }
 
 void BindlessDescriptorTable::WriteSampler(SamplerId id, VkSampler sampler) {
-    Assert(id < MaxSamplers, "Invalid texture ID!");
-    Assert(sampler, "Mut have a valid sampler!");
+    ENGINE_ASSERT(id < MaxSamplers, "Invalid texture ID!");
+    ENGINE_ASSERT(sampler, "Mut have a valid sampler!");
     
     VkDescriptorImageInfo image_info {
         .sampler = sampler,
@@ -362,9 +363,9 @@ void BindlessDescriptorTable::WriteSampler(SamplerId id, VkSampler sampler) {
 }
 
 void BindlessDescriptorTable::WriteStorageImage(StorageImageId id, const VulkanImage &image) {
-    Assert(id < MaxStorageImages, "Invalid storage image ID!");
-    Assert(image.Layout() == VK_IMAGE_LAYOUT_GENERAL, "Cannot write to storage image without GENERAL layout!");
-    Assert(image.Usage() & VK_IMAGE_USAGE_STORAGE_BIT, "Cannot write to storage image using non-storage image.");
+    ENGINE_ASSERT(id < MaxStorageImages, "Invalid storage image ID!");
+    ENGINE_ASSERT(image.Layout() == VK_IMAGE_LAYOUT_GENERAL, "Cannot write to storage image without GENERAL layout!");
+    ENGINE_ASSERT(image.Usage() & VK_IMAGE_USAGE_STORAGE_BIT, "Cannot write to storage image using non-storage image.");
 
     VkDescriptorImageInfo image_info {
         .sampler = VK_NULL_HANDLE,
@@ -387,7 +388,7 @@ void BindlessDescriptorTable::WriteStorageImage(StorageImageId id, const VulkanI
 
 
 void BindlessDescriptorTable::WriteAccelerationStructure(AccelerationStructureId id, VkAccelerationStructureKHR acceleration_structure) {
-    Assert(id < MaxAccelerationStructures, "Invalid storage image ID!");
+    ENGINE_ASSERT(id < MaxAccelerationStructures, "Invalid storage image ID!");
     
     VkWriteDescriptorSetAccelerationStructureKHR acceleration_structure_info {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,

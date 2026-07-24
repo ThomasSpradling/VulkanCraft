@@ -11,3 +11,7 @@ target_link_libraries(application_client PUBLIC
     engine_asset_manager
     engine_world
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(application_client PUBLIC TracyClient)
+endif()

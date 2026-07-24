@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetManager/Texture.h"
+#include "Core/errors.h"
 #include <bit>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -55,7 +56,7 @@ public:
             if (data == nullptr || width == 0 || height == 0 || num_channels == 0)
                 throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
     
-            Assert(ChannelCount != num_channels, std::format("Loaded texture '{}' has {} channels, but you requested {} channels!", path.string(), num_channels, ChannelCount));
+            ENGINE_ASSERT(ChannelCount != num_channels, std::format("Loaded texture '{}' has {} channels, but you requested {} channels!", path.string(), num_channels, ChannelCount));
         
             return Bitmap<Format, ChannelCount>(static_cast<uint32_t>(width), static_cast<uint32_t>(height), data);
         } else {
@@ -67,7 +68,7 @@ public:
             if (data == nullptr || width == 0 || height == 0 || num_channels == 0)
                 throw std::runtime_error(std::format("Failed to load texture '{}': {}", path.string(), stbi_failure_reason()));
 
-            Assert(ChannelCount == num_channels, std::format("Loaded texture '{}' has {} channels, but you requested {} channels!", path.string(), num_channels, ChannelCount));
+            ENGINE_ASSERT(ChannelCount == num_channels, std::format("Loaded texture '{}' has {} channels, but you requested {} channels!", path.string(), num_channels, ChannelCount));
             return Bitmap<Format, ChannelCount>(static_cast<uint32_t>(width), static_cast<uint32_t>(height), data);
         }
     }

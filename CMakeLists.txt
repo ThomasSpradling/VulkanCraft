@@ -21,9 +21,33 @@ target_compile_definitions(engine_definitions INTERFACE
     ASSET_PATH="${CMAKE_SOURCE_DIR}/Assets"
 )
 
-# -- VALIDATION LAYERS -- #
+# -- OPTIONS -- #
 
 option(ENGINE_ENABLE_VALIDATION_LAYERS "Enable Validation Layers" ON)
+option(ENGINE_WARNINGS_AS_ERRORS "Enable Warnings as Errors" ON)
+option(ENGINE_STRICT_WARNINGS "Enable Strict Warnings" ON)
+option(ENABLE_CLANG_TIDY "Run clang-tidy." OFF)
+option(ENGINE_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
+option(ENGINE_ENABLE_ASSERTIONS "Enable Assertions" ON)
+
+option(ENGINE_ENABLE_PROFILING "Enable Profiling" ON)
+option(ENGINE_ENABLE_TRACY_PROFILING "Enable Tracy Profiling" ON)
+option(ENGINE_ENABLE_TRACY_GPU_PROFILING "Enable Tracy GPU Profiling" ON)
+
+# -- TRACY -- #
+if (NOT ENGINE_ENABLE_PROFILING)
+    set(ENGINE_ENABLE_TRACY_PROFILING OFF CACHE BOOL "Cannot enable Tracy profiling while engine profiling is off." FORCE)
+    set(ENGINE_ENABLE_TRACY_GPU_PROFILING OFF CACHE BOOL "Cannot enable Tracy profiling while engine profiling is off." FORCE)
+elseif (ENGINE_ENABLE_TRACY_GPU_PROFILING AND NOT ENGINE_ENABLE_TRACY_PROFILING)
+    set(ENGINE_ENABLE_TRACY_PROFILING ON CACHE BOOL "Automatically enabling Tracy profiling since GPU Tracy profiling was enabled." FORCE)
+endif()
+
+target_compile_definitions(engine_definitions INTERFACE
+    ENGINE_ENABLE_PROFILING=$<BOOL:${ENGINE_ENABLE_TRACY_PROFILING}>
+    ENGINE_ENABLE_GPU_PROFILING=$<BOOL:${ENGINE_ENABLE_TRACY_GPU_PROFILING}>
+)
+
+# -- VALIDATION LAYERS -- #
 
 target_compile_definitions(engine_definitions INTERFACE
     ENGINE_ENABLE_VALIDATION_LAYERS=$<BOOL:${ENGINE_ENABLE_VALIDATION_LAYERS}>
@@ -31,9 +55,6 @@ target_compile_definitions(engine_definitions INTERFACE
 )
 
 # -- WARNINGS AND ERRORS -- #
-
-option(ENGINE_WARNINGS_AS_ERRORS "Enable Warnings as Errors" ON)
-option(ENGINE_STRICT_WARNINGS "Enable Strict Warnings" ON)
 
 if(MSVC)
     if(ENGINE_STRICT_WARNINGS)
@@ -73,6 +94,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
     )
 endif()
 
+target_compile_definitions(engine_definitions INTERFACE
+    ENGINE_ENABLE_ASSERTIONS=$<BOOL:${ENGINE_ENABLE_ASSERTIONS}>
+)
+
 target_compile_options(engine_options INTERFACE ${WARNINGS})
 
 # -- THIRD PARTY -- #
@@ -80,8 +105,6 @@ target_compile_options(engine_options INTERFACE ${WARNINGS})
 add_subdirectory(third_party SYSTEM)
 
 # -- CLANG TIDY -- #
-
-option(ENABLE_CLANG_TIDY "Run clang-tidy." OFF)
 
 if(ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
@@ -95,8 +118,6 @@ if(ENABLE_CLANG_TIDY)
 endif()
 
 # -- ADDRESS SANITIZER -- #
-
-option(ENGINE_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 
 if(ENGINE_ENABLE_ADDRESS_SANITIZER)
     message(STATUS "AddressSanitizer enabled")

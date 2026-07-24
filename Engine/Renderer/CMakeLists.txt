@@ -17,3 +17,7 @@ target_link_libraries(engine_renderer PUBLIC
     imgui
     slang::slang
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(engine_renderer PUBLIC TracyClient)
+endif()

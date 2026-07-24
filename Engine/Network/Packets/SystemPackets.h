@@ -10,11 +10,11 @@
 
 constexpr uint16_t MAX_PACKET_FRAGMENT_SIZE = 1024;
 constexpr uint32_t MAX_FRAGMENTS_PER_PACKET = 256;
-constexpr uint32_t MAX_NETWORK_FRAGMENT_SIZE = MAX_PACKET_FRAGMENT_SIZE * MAX_FRAGMENTS_PER_PACKET;
+[[maybe_unused]] constexpr uint32_t MAX_NETWORK_FRAGMENT_SIZE = MAX_PACKET_FRAGMENT_SIZE * MAX_FRAGMENTS_PER_PACKET;
 
 constexpr uint16_t MAX_PACKET_SLICE_SIZE = 1024;
 constexpr uint32_t MAX_SLICES_PER_CHUNK = 256;
-constexpr uint32_t MAX_NETWORK_CHUNK_SIZE = MAX_PACKET_SLICE_SIZE * MAX_SLICES_PER_CHUNK;
+[[maybe_unused]] constexpr uint32_t MAX_NETWORK_CHUNK_SIZE = MAX_PACKET_SLICE_SIZE * MAX_SLICES_PER_CHUNK;
 
 constexpr uint32_t BITS_PER_BYTE = CHAR_BIT;
 
@@ -56,7 +56,7 @@ public:
     std::array<uint8_t, MAX_PACKET_FRAGMENT_SIZE> data {};  
 public:
     virtual void SerializeData(NetworkBuffer &buffer) const override {
-        Assert(fragment_id < num_fragments, "Fragment Packet Write: Fragment id out of bounds!");
+        ENGINE_ASSERT(fragment_id < num_fragments, "Fragment Packet Write: Fragment id out of bounds!");
 
         buffer.WriteByte(fragment_id);
         buffer.WriteByte(num_fragments);
@@ -64,7 +64,7 @@ public:
         if (fragment_id == num_fragments - 1)
             buffer.WriteShort(fragment_bytes);
         else
-            Assert(fragment_bytes == MAX_PACKET_FRAGMENT_SIZE, "Fragment Packet Write: A non-full packet fragment should only be possible on the final packet!");
+            ENGINE_ASSERT(fragment_bytes == MAX_PACKET_FRAGMENT_SIZE, "Fragment Packet Write: A non-full packet fragment should only be possible on the final packet!");
 
         for (uint32_t i = 0; i < fragment_bytes; ++i) {
             buffer.WriteByte(data[i]);
@@ -75,7 +75,7 @@ public:
         fragment_id = buffer.ReadByte();
         num_fragments = buffer.ReadByte();
 
-        Assert(fragment_id < num_fragments, "Fragment Packet Read: Fragment id out of bounds!");
+        ENGINE_ASSERT(fragment_id < num_fragments, "Fragment Packet Read: Fragment id out of bounds!");
 
         fragment_bytes = (fragment_id == num_fragments - 1) ? buffer.ReadShort() : MAX_PACKET_FRAGMENT_SIZE;
         for (uint32_t i = 0; i < fragment_bytes; ++i) {
@@ -99,7 +99,7 @@ public:
     std::array<uint8_t, MAX_PACKET_SLICE_SIZE> data {};
 public:
     virtual void SerializeData(NetworkBuffer &buffer) const override {
-        Assert(slice_id < num_slices, "Slice Packet Write: Slice id out of bounds!");
+        ENGINE_ASSERT(slice_id < num_slices, "Slice Packet Write: Slice id out of bounds!");
 
         buffer.WriteShort(chunk_id);
         buffer.WriteByte(slice_id);
@@ -108,7 +108,7 @@ public:
         if (slice_id == num_slices - 1)
             buffer.WriteShort(slice_bytes);
         else
-            Assert(slice_bytes == MAX_PACKET_SLICE_SIZE, "Slice Packet Write: A non-full packet slice should only be possible on the final packet!");
+            ENGINE_ASSERT(slice_bytes == MAX_PACKET_SLICE_SIZE, "Slice Packet Write: A non-full packet slice should only be possible on the final packet!");
 
         for (uint32_t i = 0; i < slice_bytes; ++i) {
             buffer.WriteByte(data[i]);
@@ -120,7 +120,7 @@ public:
         slice_id = buffer.ReadByte();
         num_slices = buffer.ReadByte();
 
-        Assert(slice_id < num_slices, "Slice Packet Read: Slice id out of bounds!");
+        ENGINE_ASSERT(slice_id < num_slices, "Slice Packet Read: Slice id out of bounds!");
 
         slice_bytes = (slice_id == num_slices - 1) ? buffer.ReadShort() : MAX_PACKET_SLICE_SIZE;
         for (uint32_t i = 0; i < slice_bytes; ++i) {
@@ -185,7 +185,7 @@ public:
     virtual PacketType Type() const override { return PacketType::Test; }
 };
 
-constexpr uint32_t MAX_SIZE = 4096 * 4;
+[[maybe_unused]] constexpr uint32_t MAX_SIZE = 4096 * 4;
 struct LargeTestPacket : public Packet {
 public:
     uint32_t num_items = 0;

@@ -14,3 +14,7 @@ target_link_libraries(engine_asset_manager PUBLIC
     tinygltf
     mikktspace
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(engine_asset_manager PUBLIC TracyClient)
+endif()

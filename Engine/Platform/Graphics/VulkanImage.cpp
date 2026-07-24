@@ -1,5 +1,6 @@
 #include "VulkanImage.h"
 #include "Common.h"
+#include "Core/errors.h"
 #include "VulkanBuffer.h"
 #include <algorithm>
 #include <format>
@@ -114,7 +115,7 @@ VulkanImageBuilder &VulkanImageBuilder::SharedQueueFamilies(std::span<uint32_t> 
 std::unique_ptr<VulkanImage> VulkanImageBuilder::Build() {
     VkSharingMode sharing_mode = m_queue_families.size() >= 2 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     
-    Assert(m_format, "Image must have a format!");
+    ENGINE_ASSERT(m_format, "Image must have a format!");
 
     if (m_mip_levels == AutoComputeMipLevels) {
         m_mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max({m_extent.width, m_extent.height, m_extent.depth})))) + 1;
@@ -270,20 +271,20 @@ void VulkanImage::Upload(const void *data, VkDeviceSize bytes) {
 }
 
 void VulkanImage::Upload(const CommandBuffer &cmd, TextureRange range, const void *data, uint32_t buffer_row_length) {
-    Assert(data != nullptr, "Cannot upload null texture data.");
-    Assert(glm::all(glm::greaterThan(range.dimensions, glm::uvec3(0))), "Texture upload dimensions must be non-zero.");
-    Assert(glm::all(glm::greaterThanEqual(range.offset, glm::ivec3(0))), "Texture upload offset cannot be negative.");
-    Assert(range.num_layers > 0, "Texture upload must contain at least one layer.");
-    Assert(range.num_mip_levels > 0, "Texture upload must contain at least one mip level.");
+    ENGINE_ASSERT(data != nullptr, "Cannot upload null texture data.");
+    ENGINE_ASSERT(glm::all(glm::greaterThan(range.dimensions, glm::uvec3(0))), "Texture upload dimensions must be non-zero.");
+    ENGINE_ASSERT(glm::all(glm::greaterThanEqual(range.offset, glm::ivec3(0))), "Texture upload offset cannot be negative.");
+    ENGINE_ASSERT(range.num_layers > 0, "Texture upload must contain at least one layer.");
+    ENGINE_ASSERT(range.num_mip_levels > 0, "Texture upload must contain at least one mip level.");
 
-    Assert(range.layer < m_array_layers && range.num_layers <= m_array_layers - range.layer,
+    ENGINE_ASSERT(range.layer < m_array_layers && range.num_layers <= m_array_layers - range.layer,
         std::format("Texture layer range [{}..{}) exceeds the image's {} layers.", range.layer, range.layer + range.num_layers, m_array_layers));
 
-    Assert(range.mip_levels < m_mip_levels && range.num_mip_levels <= m_mip_levels - range.mip_levels,
+    ENGINE_ASSERT(range.mip_levels < m_mip_levels && range.num_mip_levels <= m_mip_levels - range.mip_levels,
         std::format("Texture mip range [{}..{}) exceeds the image's {} mip levels.", range.mip_levels,
             range.mip_levels + range.num_mip_levels, m_mip_levels));
 
-    Assert(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || m_layout == VK_IMAGE_LAYOUT_GENERAL ||
+    ENGINE_ASSERT(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || m_layout == VK_IMAGE_LAYOUT_GENERAL ||
         m_layout == VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR,
         "Cannot upload image unless its layout is TRANSFER_DST_OPTIMAL, GENERAL, or SHARED_PRESENT_KHR.");
 
@@ -320,7 +321,7 @@ void VulkanImage::Upload(const CommandBuffer &cmd, TextureRange range, const voi
 
         const VkExtent3D mip_extent = image_mip_extent(mip);
 
-        Assert(static_cast<uint64_t>(offset.x) + dimensions.width <= mip_extent.width &&
+        ENGINE_ASSERT(static_cast<uint64_t>(offset.x) + dimensions.width <= mip_extent.width &&
                 static_cast<uint64_t>(offset.y) + dimensions.height <= mip_extent.height &&
                 static_cast<uint64_t>(offset.z) + dimensions.depth <= mip_extent.depth,
             std::format("Texture region [{}, {}, {}] + [{} x {} x {}] exceeds mip {} extent [{} x {} x {}].",
@@ -328,7 +329,7 @@ void VulkanImage::Upload(const CommandBuffer &cmd, TextureRange range, const voi
                 mip, mip_extent.width, mip_extent.height, mip_extent.depth));
 
         const uint32_t row_length = buffer_row_length == 0 ? 0 : mip_dimension(buffer_row_length, relative_mip);
-        Assert(row_length == 0 || row_length >= dimensions.width,
+        ENGINE_ASSERT(row_length == 0 || row_length >= dimensions.width,
             std::format("Buffer row length {} is smaller than mip {} copy width {}.", row_length, mip, dimensions.width));
 
         const VkDeviceSize source_row_length = row_length == 0 ? dimensions.width : row_length;
@@ -387,12 +388,12 @@ void VulkanImage::TransitionLayout(VkImageLayout layout) {
 
 void VulkanImage::UploadLayers(const void *data, VkDeviceSize bytes, uint32_t layer, uint32_t layer_count) {
     VkDeviceSize source_bytes = GetBytesPerPixel(m_format) * m_extent.width * m_extent.height * m_extent.depth * layer_count;
-    Assert(bytes == source_bytes, std::format("Non-matching sizes! Source data was {} bytes, but target data was"
+    ENGINE_ASSERT(bytes == source_bytes, std::format("Non-matching sizes! Source data was {} bytes, but target data was"
         "[{} x {} x {}] x {} bytes x {} layers = {} bytes!", 
         bytes, m_extent.width, m_extent.height, m_extent.depth,
         GetBytesPerPixel(m_format), layer_count, source_bytes));
 
-    Assert(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    ENGINE_ASSERT(m_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
         || m_layout == VK_IMAGE_LAYOUT_GENERAL
         || m_layout == VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR, "Cannot upload image unless layout is either TRANSFER_DST, GENERAL, or SHARED_PRESENT.");
 

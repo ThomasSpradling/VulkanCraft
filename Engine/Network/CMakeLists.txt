@@ -11,3 +11,7 @@ target_link_libraries(engine_network PUBLIC
     glm
     crc32
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(engine_network PUBLIC TracyClient)
+endif()

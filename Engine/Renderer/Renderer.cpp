@@ -3,6 +3,7 @@
 #include "AssetManager/GPUStructs.h"
 #include "AssetManager/Material.h"
 #include "Common.h"
+#include "Core/Core.h"
 #include "DebugRenderer.h"
 #include "ImGuiRenderer.h"
 #include "Platform/Graphics/CommandBuffer.h"
@@ -64,20 +65,24 @@ void Renderer::Initialize() {
 }
 
 void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions &options) {
+    ENGINE_PROFILER_FUNCTION();
+
     //// Prepare Frame ////
     FrameContext &frame = m_frame_data[m_frame_index];
-
     frame.graphics_submit_fence->Wait();
     m_device.GetGarbageCollector().Collect(m_frame_index);
 
-    auto image_index = m_swapchain->AcquireNextImage(nullptr, frame.image_available->Handle());
+    std::optional<uint32_t> image_index = m_swapchain->AcquireNextImage(nullptr, frame.image_available->Handle());
     if (!image_index) {
         RecreateSwapChain();
         return;
     }
-    
-    frame.graphics_submit_fence->Reset();
-    frame.command_pool->Reset();
+
+    {
+        ENGINE_PROFILER_ZONE("Reset frame", EngineProfilerColor_Wait);
+        frame.graphics_submit_fence->Reset();
+        frame.command_pool->Reset();
+    }
 
     m_device.GetGarbageCollector().SetCurrentFrame(m_frame_index);
     
@@ -91,63 +96,67 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     glm::mat4 camera_model = world.GlobalMatrix(camera);
     glm::mat4 view_matrix = glm::inverse(camera_model);
 
-    VulkanBuffer &scene_buffer = m_asset_manager->GetBuffer(frame.scene_uniform_buffer);
-    VulkanBuffer &light_data = m_asset_manager->GetBuffer(frame.light_data);
-    VulkanBuffer &point_lights = m_asset_manager->GetBuffer(frame.point_lights);
-    
-    m_push_constant.scene_data_buffer = scene_buffer.DeviceAddress();
     {
-        auto *data = scene_buffer.Mapped<SceneUniformData>();
-        data->projection = projection_matrix;
-        data->eye_position = glm::vec4(world.WorldPosition(camera), 1.0f);
-        data->view = view_matrix;
-        data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
-        data->ambient = m_environment_settings.ambient_color * m_environment_settings.ambient_intensity;
-        data->light_data = light_data.DeviceAddress();
-    }
+        ENGINE_PROFILER_ZONE("Updating Uniform Buffer", EngineProfilerColor_Create);
 
-    bool found = false;
-    DirectionalLight directional_light;
-    glm::vec3 light_direction;
-    world.Each<DirectionalLight>([&](Entity entity, DirectionalLight &light) {
-        if (found)
-            return;
-        directional_light = light;
-        found = true;
+        VulkanBuffer &scene_buffer = m_asset_manager->GetBuffer(frame.scene_uniform_buffer);
+        VulkanBuffer &light_data = m_asset_manager->GetBuffer(frame.light_data);
+        VulkanBuffer &point_lights = m_asset_manager->GetBuffer(frame.point_lights);
         
-        light_direction = glm::normalize(world.Get<Transform>(entity).rotation * glm::vec3(0.0f, 0.0f, -1.0f));
-    });
+        m_push_constant.scene_data_buffer = scene_buffer.DeviceAddress();
+        {
+            auto *data = scene_buffer.Mapped<SceneUniformData>();
+            data->projection = projection_matrix;
+            data->eye_position = glm::vec4(world.WorldPosition(camera), 1.0f);
+            data->view = view_matrix;
+            data->sun_direction = glm::vec4(1.0, -2.0, -1.0, 2.0);
+            data->ambient = m_environment_settings.ambient_color * m_environment_settings.ambient_intensity;
+            data->light_data = light_data.DeviceAddress();
+        }
 
-    if (!found) {
-        directional_light.color = glm::vec4(1.0f);
-        directional_light.intensity = 1.0f;
-        light_direction = glm::vec3(1.0f, -2.0f, -1.0f);
-    }
-
-    {
-        auto *data = light_data.Mapped<GPULightData>();
-        data->directional_light.color = directional_light.color;
-        data->directional_light.color.w = directional_light.intensity;
-        data->directional_light.direction = light_direction;
-        data->point_lights = point_lights.DeviceAddress();
-
-        auto *point_light_data = point_lights.Mapped<GPUPointLight>();
-        uint32_t point_light_count = 0;
-        world.Each<PointLight>([&](Entity entity, PointLight &light) {
-            if (point_light_count >= MaxPointLights) {
-                std::cerr << "Warning: Too many point lights! Not rendering anymore.\n";
+        bool found = false;
+        DirectionalLight directional_light;
+        glm::vec3 light_direction;
+        world.Each<DirectionalLight>([&](Entity entity, DirectionalLight &light) {
+            if (found)
                 return;
-            }
-    
-            GPUPointLight &gpu_light = point_light_data[point_light_count];
-            gpu_light.color = light.color;
-            gpu_light.color.w = light.intensity;
-            gpu_light.range = light.range;
-            gpu_light.position = glm::vec3(world.WorldPosition(entity));
-    
-            point_light_count++;
+            directional_light = light;
+            found = true;
+            
+            light_direction = glm::normalize(world.Get<Transform>(entity).rotation * glm::vec3(0.0f, 0.0f, -1.0f));
         });
-        data->point_light_count = point_light_count;
+
+        if (!found) {
+            directional_light.color = glm::vec4(1.0f);
+            directional_light.intensity = 1.0f;
+            light_direction = glm::vec3(1.0f, -2.0f, -1.0f);
+        }
+
+        {
+            auto *data = light_data.Mapped<GPULightData>();
+            data->directional_light.color = directional_light.color;
+            data->directional_light.color.w = directional_light.intensity;
+            data->directional_light.direction = light_direction;
+            data->point_lights = point_lights.DeviceAddress();
+
+            auto *point_light_data = point_lights.Mapped<GPUPointLight>();
+            uint32_t point_light_count = 0;
+            world.Each<PointLight>([&](Entity entity, PointLight &light) {
+                if (point_light_count >= MaxPointLights) {
+                    std::cerr << "Warning: Too many point lights! Not rendering anymore.\n";
+                    return;
+                }
+        
+                GPUPointLight &gpu_light = point_light_data[point_light_count];
+                gpu_light.color = light.color;
+                gpu_light.color.w = light.intensity;
+                gpu_light.range = light.range;
+                gpu_light.position = glm::vec3(world.WorldPosition(entity));
+        
+                point_light_count++;
+            });
+            data->point_light_count = point_light_count;
+        }
     }
 
     CommandBuffer &cmd = *frame.command_buffer;
@@ -157,160 +166,184 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     auto clear_color = glm::vec4(0.25f, 0.05f, 0.8f, 1.0f);
 
     cmd.Begin();
-    cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
+    {
+        ENGINE_PROFILER_ZONE("Recording Commands", 0xFFFFFF);
+        ENGINE_PROFILER_GPU_COLLECT(m_device, cmd);
 
-    cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
+        ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Graphics Draw", 0xFFFFFF);
 
-    cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
+        cmd.SetViewportAndScissor(glm::ivec2(0), glm::uvec2(extent.width, extent.height));
 
-    //// Draw Scene Geometry ////
+        cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        cmd.TransitionLayout(*context.depth_buffer, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR);
 
-    cmd.BeginLabel("Draw Scene");
-    cmd.BindPipeline(*m_triangle_pipeline);
-    // cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
-    cmd.BeginRendering({
-        ImageAttachment {
-            .type = AttachmentType::Color,
-            .image = *context.draw_image,
-            .should_clear = true,
-            .clear_color = clear_color,
-        },
-        ImageAttachment {
-            .type = AttachmentType::Depth,
-            .image = *context.depth_buffer,
-            .should_clear = true,
-        }
-    });
-    m_push_constant.material_buffer = m_asset_manager->MaterialBuffer().DeviceAddress();
+        cmd.BindDescriptorSet(0, *m_triangle_pipeline, m_bindless_table->GlobalDescriptorSet());
 
-    world.Each<ProceduralMeshComponent>([&](Entity entity, ProceduralMeshComponent &component) {
-        if (!component.visible)
-            return;
+        // Draw Scene Geometry ////
 
-        auto &mesh = m_asset_manager->GetMesh(component.mesh);
-        auto &material = m_asset_manager->GetMaterial(component.material);
-        m_push_constant.vertex_buffer = mesh.VertexBuffer().DeviceAddress();
+        cmd.BeginLabel("Draw Scene");
+        {
+            ENGINE_PROFILER_ZONE("Recording Draw Scene", 0x585D89);
+            ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Draw Scene", 0x585D89);
 
-        cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
-
-        m_push_constant.model = world.GlobalMatrix(entity);
-        m_push_constant.material_id = material.material_index;
-
-        cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
-        cmd.DrawIndexed(mesh.IndexCount());
-    });
-
-    world.Each<GLTFMeshComponent>([&](Entity entity, GLTFMeshComponent &component) {
-        if (!component.visible)
-            return;
-
-        auto &gltf = m_asset_manager->GetGLTF(component.gltf);
-        m_push_constant.vertex_buffer = gltf.VertexBuffer().DeviceAddress();
-        cmd.BindIndexBuffer(gltf.IndexBuffer().Buffer());
-
-        const GLTFModel::Node &node = gltf.GetNode(component.node_index);
-        if (!node.mesh)
-            return;
-        m_push_constant.model = world.GlobalMatrix(entity);
-
-        for (const GLTFModel::Primitive &primitive : node.mesh->primitives) {
-            m_push_constant.material_id = primitive.material_index;
-            cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
-            cmd.DrawIndexed(primitive.index_count, 1, primitive.start_index);
-        }
-    });
-    cmd.EndRendering();
-    cmd.EndLabel();
-
-    //// Draw Cube Map ////
-    if (m_environment_settings.environment_map) {
-        TextureId envmap_id = m_asset_manager->GetTexture(m_environment_settings.environment_map).first;
+            cmd.BindPipeline(*m_triangle_pipeline);
+            cmd.BeginRendering({
+                ImageAttachment {
+                    .type = AttachmentType::Color,
+                    .image = *context.draw_image,
+                    .should_clear = true,
+                    .clear_color = clear_color,
+                },
+                ImageAttachment {
+                    .type = AttachmentType::Depth,
+                    .image = *context.depth_buffer,
+                    .should_clear = true,
+                }
+            });
+            m_push_constant.material_buffer = m_asset_manager->MaterialBuffer().DeviceAddress();
     
-        cmd.BeginLabel("Sky Box", glm::vec4(1.0f, 1.0f, 0.8f, 1.0f));
-        // cmd.BindDescriptorSet(0, *m_skybox_pipeline, m_bindless_table->GlobalDescriptorSet());
-        cmd.BindPipeline(*m_skybox_pipeline);
-        cmd.BeginRendering({
-            ImageAttachment {
+            world.Each<ProceduralMeshComponent>([&](Entity entity, ProceduralMeshComponent &component) {
+                if (!component.visible)
+                    return;
+    
+                auto &mesh = m_asset_manager->GetMesh(component.mesh);
+                auto &material = m_asset_manager->GetMaterial(component.material);
+                m_push_constant.vertex_buffer = mesh.VertexBuffer().DeviceAddress();
+    
+                cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
+    
+                m_push_constant.model = world.GlobalMatrix(entity);
+                m_push_constant.material_id = material.material_index;
+    
+                cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
+                cmd.DrawIndexed(mesh.IndexCount());
+            });
+    
+            world.Each<GLTFMeshComponent>([&](Entity entity, GLTFMeshComponent &component) {
+                if (!component.visible)
+                    return;
+    
+                auto &gltf = m_asset_manager->GetGLTF(component.gltf);
+                m_push_constant.vertex_buffer = gltf.VertexBuffer().DeviceAddress();
+                cmd.BindIndexBuffer(gltf.IndexBuffer().Buffer());
+    
+                const GLTFModel::Node &node = gltf.GetNode(component.node_index);
+                if (!node.mesh)
+                    return;
+                m_push_constant.model = world.GlobalMatrix(entity);
+    
+                for (const GLTFModel::Primitive &primitive : node.mesh->primitives) {
+                    m_push_constant.material_id = primitive.material_index;
+                    cmd.PushConstants(m_triangle_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, m_push_constant);
+                    cmd.DrawIndexed(primitive.index_count, 1, primitive.start_index);
+                }
+            });
+            cmd.EndRendering();
+        }
+        cmd.EndLabel();
+
+        // Draw Cube Map ////
+        if (m_environment_settings.environment_map) {
+            ENGINE_PROFILER_ZONE("Recording Draw Cube Map", 0xB8F5ED);
+            ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Draw Cube Map", 0xB8F5ED);
+
+            TextureId envmap_id = m_asset_manager->GetTexture(m_environment_settings.environment_map).first;
+        
+            cmd.BeginLabel("Sky Box", glm::vec4(1.0f, 1.0f, 0.8f, 1.0f));
+            cmd.BindPipeline(*m_skybox_pipeline);
+            cmd.BeginRendering({
+                ImageAttachment {
+                    .type = AttachmentType::Color,
+                    .image = *context.draw_image,
+                },
+                ImageAttachment {
+                    .type = AttachmentType::Depth,
+                    .image = *context.depth_buffer,
+                }
+            });
+                const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
+                glm::vec3 camera_translation = world.WorldPosition(camera);
+                glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
+        
+                VulkanBuffer &skybox_data = m_asset_manager->GetBuffer(frame.skybox_data);
+                auto *data = skybox_data.Mapped<GPUSkyboxData>();
+                data->vertex_buffer = mesh.VertexBuffer().DeviceAddress();
+                data->envmap_id = envmap_id;
+                data->model = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f));
+                data->view_projection = projection_matrix * camera_transform;
+
+                cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
+                    .skybox_data = skybox_data.DeviceAddress(),
+                });
+                cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
+                cmd.DrawIndexed(mesh.IndexCount());
+            cmd.EndRendering();
+            cmd.EndLabel();
+
+            m_push_constant.envmap_id = envmap_id;
+        }
+
+        //// Draw Debug ////
+
+        cmd.BeginLabel("Draw Debug Lines");
+        {
+            ENGINE_PROFILER_ZONE("Recording Draw Debug Lines", 0xFF4242);
+            ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Draw Debug Lines", 0xFF4242);
+
+            m_debug_canvas->Render(cmd, projection_matrix * view_matrix,
+                ImageAttachment {
+                    .type = AttachmentType::Color,
+                    .image = *context.draw_image,
+                },
+                ImageAttachment {
+                    .type = AttachmentType::Depth,
+                    .image = *context.depth_buffer,
+                }
+            );
+    
+            m_debug_canvas->Clear();
+        }
+        cmd.EndLabel();
+
+        //// Draw ImGui ////
+
+        cmd.BeginLabel("Render ImGui");
+        {
+            ENGINE_PROFILER_ZONE("Recording Render ImGui", 0x53AC82);
+            ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Render ImGui", 0x53AC82);
+
+            m_imgui_renderer->BeginFrame();
+            m_render_ui();
+            m_imgui_renderer->EndFrame(cmd, ImageAttachment {
                 .type = AttachmentType::Color,
                 .image = *context.draw_image,
-            },
-            ImageAttachment {
-                .type = AttachmentType::Depth,
-                .image = *context.depth_buffer,
-            }
-        });
-            const Mesh &mesh = m_asset_manager->GetMesh(m_skybox);
-            glm::vec3 camera_translation = world.WorldPosition(camera);
-            glm::mat4 camera_transform = glm::inverse(glm::translate(glm::mat4(1.0f), camera_translation)) * view_matrix;
-    
-            VulkanBuffer &skybox_data = m_asset_manager->GetBuffer(frame.skybox_data);
-            auto *data = skybox_data.Mapped<GPUSkyboxData>();
-            data->vertex_buffer = mesh.VertexBuffer().DeviceAddress();
-            data->envmap_id = envmap_id;
-            data->model = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f));
-            data->view_projection = projection_matrix * camera_transform;
-
-            cmd.PushConstants(m_skybox_pipeline->Layout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, SkyboxPushConstants {
-                .skybox_data = skybox_data.DeviceAddress(),
             });
-            cmd.BindIndexBuffer(mesh.IndexBuffer().Buffer());
-            cmd.DrawIndexed(mesh.IndexCount());
-        cmd.EndRendering();
-        cmd.EndLabel();
-
-        m_push_constant.envmap_id = envmap_id;
-    }
-
-    //// Draw Debug ////
-
-    cmd.BeginLabel("Draw Debug Lines");
-
-    m_debug_canvas->Render(cmd, projection_matrix * view_matrix,
-        ImageAttachment {
-            .type = AttachmentType::Color,
-            .image = *context.draw_image,
-        },
-        ImageAttachment {
-            .type = AttachmentType::Depth,
-            .image = *context.depth_buffer,
+            cmd.EndLabel();
         }
-    );
+        
+        //// Copy to Swap Chain ////
 
-    m_debug_canvas->Clear();
-    cmd.EndLabel();
+        cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
+        {
+            ENGINE_PROFILER_ZONE("Recording Copy Image to SwapChain", EngineProfilerColor_Transfer);
+            ENGINE_PROFILER_GPU_ZONE(m_device, cmd, "Copy Image to SwapChain", EngineProfilerColor_Transfer);
 
-    //// Draw ImGui ////
-
-    cmd.BeginLabel("Render ImGui");
-    m_imgui_renderer->BeginFrame();
-
-    m_render_ui();
-
-    m_imgui_renderer->EndFrame(cmd, ImageAttachment {
-        .type = AttachmentType::Color,
-        .image = *context.draw_image,
-    });
-    cmd.EndLabel();
-    
-    //// Copy to Swap Chain ////
-
-    cmd.BeginLabel("Copying image to swapchain", glm::vec4(0.0f, 0.8f, 0.0f, 1.0f));
-        cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        cmd.CopyImage(*context.draw_image, swapchain_image);
-
-        cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            cmd.TransitionLayout(*context.draw_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            cmd.CopyImage(*context.draw_image, swapchain_image);
+            cmd.TransitionLayout(swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        }
         cmd.EndLabel();
+    }
     cmd.End();
-
+    
     //// Prepare for Next Frame ////
+
     QueueSubmitInfo submit_info {};
     submit_info.wait_semaphores.push_back({
         .semaphore = frame.image_available.get(),
         .value = 0,
-        .stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
     });
 
     submit_info.signal_semaphores.push_back({
@@ -324,10 +357,13 @@ void Renderer::RenderScene(World &world, Entity camera, const SceneRenderOptions
     m_device.QueueSubmit(QueueType::Graphics, submit_info, *frame.graphics_submit_fence);
 
     std::vector<VkSemaphore> present_waits { swapchain_context.render_finished->Handle() };
+    
     if (!m_swapchain->Present(present_waits))
         RecreateSwapChain();
 
     m_frame_index = (m_frame_index + 1) % MaxFramesInFlight;
+
+    ENGINE_PROFILER_FRAME();
 }
 
 void Renderer::EnableVSync() {
@@ -396,10 +432,10 @@ void Renderer::CreateObjects() {
     CreateLights();
 
     m_triangle_shader = m_shader_compiler->Compile("GLTF/GLTFModel");
-    Assert(m_triangle_shader, "Failed to compile shader!");
+    ENGINE_ASSERT(m_triangle_shader, "Failed to compile shader!");
     
     m_skybox_shader = m_shader_compiler->Compile("SkyBox/SkyBox");
-    Assert(m_skybox_shader, "Failed to compile shader!");
+    ENGINE_ASSERT(m_skybox_shader, "Failed to compile shader!");
 
     CreateTrianglePipeline();
     CreateSwapChainObjects();
@@ -460,7 +496,7 @@ void Renderer::CreateTrianglePipeline() {
             .pData = &m_specialization_constant,
         };
     
-        Assert(m_triangle_shader, "Triangle shader was not compiled!");
+        ENGINE_ASSERT(m_triangle_shader, "Triangle shader was not compiled!");
     
         auto builder = VulkanPipeline::GraphicsBuilder(m_device, m_global_pipeline_layout)
             .VertexShader(*m_triangle_shader, "main_vert")
@@ -506,6 +542,7 @@ void Renderer::CreateTrianglePipeline() {
             .SetTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .SetPolygonMode(VK_POLYGON_MODE_FILL)
             .EnableDepthTest()
+            .DisableDepthWrite()
             .Build();
         m_skybox_pipeline->SetDebugName("SkyBox Pipeline");
     }
@@ -517,6 +554,8 @@ void Renderer::DestroyTrianglePipeline() {
 }
 
 void Renderer::RecreateSwapChain() {
+    ENGINE_PROFILER_FUNCTION();
+
     const glm::ivec2 framebuffer_size = m_window.GetFramebufferSize();
 
     if (framebuffer_size.x == 0 || framebuffer_size.y == 0)

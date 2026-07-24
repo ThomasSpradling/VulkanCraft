@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -53,6 +54,10 @@ public:
     VkSurfaceKHR Surface() const { return m_surface; }
     VmaAllocator Allocator() const { return m_allocator; }
     GarbageCollector &GetGarbageCollector() const { return *m_garbage_collector; }
+
+#if defined(ENGINE_ENABLE_GPU_PROFILING)
+    TracyVkCtx TracyContext() const { return m_tracy_context; }
+#endif
 
     VkFormat GetLinearColorFormat() const { return m_image_formats.linear_color; }
     VkFormat GetNonLinearColorFormat() const { return m_image_formats.nonlinear_color; }
@@ -156,6 +161,14 @@ private:
     ImageFormats m_image_formats {};
 
     std::unique_ptr<GarbageCollector> m_garbage_collector;
+
+#if defined(ENGINE_ENABLE_GPU_PROFILING)
+    TracyVkCtx m_tracy_context = nullptr;
+    std::unique_ptr<VulkanCommandPool> m_tracy_command_pool;
+    std::unique_ptr<CommandBuffer> m_tracy_command_buffer;
+
+    bool m_has_calibrated_timestamps = true;
+#endif // ENGINE_ENABLE_GPU_PROFILING
 private:
     void CreateVulkanInstance();
     void DestroyVulkanInstance();
@@ -165,6 +178,9 @@ private:
     
     void CreateVulkanDevice();
     void DestroyVulkanDevice();
+    
+    void CreateTracyContext();
+    void DestroyTracyContext();
 
     void CreateVulkanMemoryAllocator();
     void DestroyVulkanMemoryAllocator();

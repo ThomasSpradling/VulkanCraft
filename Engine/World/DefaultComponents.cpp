@@ -1,4 +1,5 @@
 #include "DefaultComponents.h"
+#include "Core/Core.h"
 #include "Core/errors.h"
 #include <variant>
 
@@ -47,13 +48,15 @@ glm::mat4 OrthographicProjection::CalculateProjectionMatrix(float aspect) const 
 
 
 glm::mat4 CalculateProjectionMatrix(const CameraComponent &camera, float aspect) {
+    ENGINE_PROFILER_FUNCTION();
+
     if (const auto* persp = std::get_if<PerspectiveProjection>(&camera)) {
         return persp->CalculateProjectionMatrix(aspect);
     } else if (const auto *ortho = std::get_if<OrthographicProjection>(&camera)) {
        return ortho->CalculateProjectionMatrix(aspect);
     }
 
-    Assert(false, "Cannot calculate projection matrix of non-valid camera!");
+    ENGINE_ASSERT(false, "Cannot calculate projection matrix of non-valid camera!");
     return glm::mat4(1.0f);
 }
 

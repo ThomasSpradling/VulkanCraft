@@ -5,6 +5,7 @@
 #include "AssetManager/Mesh.h"
 #include "Core/NonCopyable.h"
 #include "Core/NonMovable.h"
+#include "Core/errors.h"
 #include "DebugRenderer.h"
 #include "ImGuiRenderer.h"
 #include "Platform/Graphics/VulkanDevice.h"
@@ -84,7 +85,7 @@ public:
 
     void RenderUI(const std::function<void(void)> &render_ui) {  m_render_ui = render_ui; }
 
-    AssetManager &GetAssetManager() { Assert(m_asset_manager, "Must have asset manager!"); return *m_asset_manager; }
+    AssetManager &GetAssetManager() { ENGINE_ASSERT(m_asset_manager, "Must have asset manager!"); return *m_asset_manager; }
     const Window &GetWindow() const { return m_window; }
     BindlessDescriptorTable &BindlessTable() { return *m_bindless_table; }
     VkPipelineLayout GlobalPipelineLayout() { return m_global_pipeline_layout; }

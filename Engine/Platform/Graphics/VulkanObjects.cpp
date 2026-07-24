@@ -1,4 +1,6 @@
 #include "VulkanObjects.h"
+#include "Core/Core.h"
+#include "Core/errors.h"
 #include "VulkanDevice.h"
 #include "CommandBuffer.h"
 
@@ -20,7 +22,7 @@ void ShaderModule::SetDebugName(std::string_view name) const {
 }
 
 ShaderModule::~ShaderModule() {
-    Assert(m_shader_module, "Cannot destroy null shader module!");
+    ENGINE_ASSERT(m_shader_module, "Cannot destroy null shader module!");
     vkDestroyShaderModule(m_device.Device(), m_shader_module, nullptr);
 }
 
@@ -59,7 +61,7 @@ void VulkanSemaphore::SetDebugName(std::string_view name) const {
 }
 
 VulkanSemaphore::~VulkanSemaphore() {
-    Assert(m_semaphore, "Cannot destroy null semaphore!");
+    ENGINE_ASSERT(m_semaphore, "Cannot destroy null semaphore!");
     vkDestroySemaphore(m_device.Device(), m_semaphore, nullptr);
 }
 
@@ -80,6 +82,8 @@ VulkanFence::VulkanFence(const VulkanDevice &device, bool signalled)
 }
 
 void VulkanFence::Wait() const {
+    ENGINE_PROFILER_FUNCTION();
+
     VK_CHECK(vkWaitForFences(m_device.Device(), 1, &m_fence, VK_TRUE, UINT64_MAX))
 }
 
@@ -92,7 +96,7 @@ void VulkanFence::SetDebugName(std::string_view name) const {
 }
 
 VulkanFence::~VulkanFence() {
-    Assert(m_fence, "Cannot destroy null fence!");
+    ENGINE_ASSERT(m_fence, "Cannot destroy null fence!");
     vkDestroyFence(m_device.Device(), m_fence, nullptr);
 }
 

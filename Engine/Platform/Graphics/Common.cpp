@@ -1,4 +1,5 @@
 #include "Common.h"
+#include "Core/errors.h"
 #include <iostream>
 
 bool IsDepthOnlyFormat(VkFormat format) {
@@ -178,7 +179,7 @@ VkDeviceSize GetBytesPerPixel(VkFormat format) {
 			return 5;
 		case VK_FORMAT_UNDEFINED:
 		default:
-			Assert(false, "Cannot figure out the bytes per pixel of this format.");
+			ENGINE_ASSERT(false, "Cannot figure out the bytes per pixel of this format.");
             return 0;
     }
 }
@@ -199,7 +200,7 @@ VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType acc
     switch (image_layout) {
         case VK_IMAGE_LAYOUT_UNDEFINED:
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            return 0;
+            return VK_ACCESS_2_NONE;
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: {
             if (read)
                 result |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
@@ -212,7 +213,7 @@ VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType acc
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
         case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
         case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL: {
-            Assert(read, "Must specify a read access on a read-only layout!");
+            ENGINE_ASSERT(read, "Must specify a read access on a read-only layout!");
             return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         }
         case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
@@ -225,21 +226,21 @@ VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType acc
             return result;
         }
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: {
-            // std::cerr << "Warning: It is likely better to manually specify how an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed.\n";
+            std::cerr << "Warning: It is likely better to manually specify how an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed.\n";
             return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT;
         }
         case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: {
-            Assert(read, "Must specify a read access on a source transfer!");
+            ENGINE_ASSERT(read, "Must specify a read access on a source transfer!");
             return VK_ACCESS_2_TRANSFER_READ_BIT;
         }
         case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: {
-            Assert(write, "Must specify a write access on a source transfer!");
+            ENGINE_ASSERT(write, "Must specify a write access on a source transfer!");
             return VK_ACCESS_2_TRANSFER_WRITE_BIT;
         }
         case VK_IMAGE_LAYOUT_GENERAL:
-            Assert(false, "Cannot define reasonable default access flags for VK_IMAGE_LAYOUT_GENERAL.");
+            ENGINE_ASSERT(false, "Cannot define reasonable default access flags for VK_IMAGE_LAYOUT_GENERAL.");
         default:
-            Assert(false, "Cannot define reasonable default for this image layout!");
+            ENGINE_ASSERT(false, "Cannot define reasonable default for this image layout!");
     }
     return 0;
 }
@@ -247,7 +248,7 @@ VkAccessFlags2 InferAccessFlags(VkImageLayout image_layout, MemoryAccessType acc
 VkPipelineStageFlags2 InferPipelineStageFlags(VkImageLayout image_layout) {
     switch (image_layout) {
         case VK_IMAGE_LAYOUT_UNDEFINED:
-            return VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+            return VK_PIPELINE_STAGE_2_NONE;
         case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
         case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
             return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
@@ -263,23 +264,23 @@ VkPipelineStageFlags2 InferPipelineStageFlags(VkImageLayout image_layout) {
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
             return VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: {
-            // std::cerr << "Warning: It is likely better to manually specify which pipeline stage an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed in.\n";
+            std::cerr << "Warning: It is likely better to manually specify which pipeline stage an image in layout SHADER_READ_ONLY_OPTIMAL gets accessed in.\n";
             return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                // VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT |
-                // VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT |
-                // VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT |
+                VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT |
+                VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT |
+                VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT |
                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-                // VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                // VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
-                // VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT |
-                // VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT |
+                VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
         }
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            return VK_PIPELINE_STAGE_2_NONE;
         case VK_IMAGE_LAYOUT_GENERAL:
-            Assert(false, "Cannot define reasonable default access flags for VK_IMAGE_LAYOUT_GENERAL.");
+            ENGINE_ASSERT(false, "Cannot define reasonable default access flags for VK_IMAGE_LAYOUT_GENERAL.");
         default:
-            Assert(false, "Cannot define reasonable default for this image layout!");
+            ENGINE_ASSERT(false, "Cannot define reasonable default for this image layout!");
     }
     return 0;
 }
@@ -301,7 +302,7 @@ VkSampleCountFlagBits GetSampleCount(uint32_t sample_count) {
         case 64:
             return VK_SAMPLE_COUNT_64_BIT;
         default:
-            Assert(false, "Invalid sample count for VulkanImage! It must be a power of two between 1 and 64.");
+            ENGINE_ASSERT(false, "Invalid sample count for VulkanImage! It must be a power of two between 1 and 64.");
     }
     return VK_SAMPLE_COUNT_1_BIT;
 }

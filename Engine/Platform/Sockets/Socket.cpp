@@ -50,7 +50,7 @@ void Socket::Close() {
 }
 
 uint32_t Socket::SendTo(const NetworkAddress &to, const NetworkBuffer &data) {
-    Assert(data.GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Cannot send more data than MTU!");
+    ENGINE_ASSERT(data.GetSize() <= MAX_NETWORK_TRANSMISSION_SIZE, "Cannot send more data than MTU!");
     if (data.GetSize() == 0)
         return 0;
 

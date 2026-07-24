@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "ClientContext.h"
+#include "Core/Core.h"
 #include "Network/NetworkHost.h"
 #include "Platform/Sockets/SocketAPI.h"
 #include "Renderer/Renderer.h"
@@ -44,6 +45,8 @@ ClientApplication::ClientApplication(IClientGame &game, const ClientEngineConfig
 }
 
 ClientApplication::~ClientApplication() {
+    ENGINE_PROFILER_FUNCTION();
+
     m_network_host.reset();
     m_socket_api.reset();
     m_input_handler.reset();
@@ -146,11 +149,15 @@ void ClientApplication::Run() {
 }
 
 void ClientApplication::Initialize(ClientContext &context) {
+    ENGINE_PROFILER_FUNCTION();
+    
     m_renderer->Initialize();
     m_game.Initialize(context);
 }
 
 void ClientApplication::Update(double delta_time, ClientContext &context) {
+    ENGINE_PROFILER_FUNCTION();
+
     m_game.Update(delta_time, context);
     m_world->Update();
     m_input_handler->Update();

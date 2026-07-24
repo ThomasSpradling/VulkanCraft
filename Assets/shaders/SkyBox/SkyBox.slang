@@ -52,6 +52,5 @@ VertexOutput main_vert(uint vertex_id : SV_VertexID) {
 [shader("fragment")]
 float4 main_frag(VertexOutput frag) : SV_Target {
     float4 color = SampleTextureCube(g_push_constant.skybox_data->envmap_id, 0, frag.world_position);
-    // return color;
     return float4(color.rgb, 1);
 }

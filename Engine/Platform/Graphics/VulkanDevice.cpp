@@ -17,6 +17,8 @@
 
 #include <GLFW/glfw3.h>
 
+#include "Common.h"
+#include "Core/Core.h"
 #include "Core/errors.h"
 #include "VulkanObjects.h"
 
@@ -27,9 +29,9 @@ VulkanDevice::VulkanDevice(const Window &window, DeviceConfig config)
     CreateVulkanSurface(window);
     CreateVulkanDevice();
     CreateVulkanMemoryAllocator();
+    CreateTracyContext();
     
     CreateImmediateObjects();
-    
     ChooseImageFormats();
 
     m_garbage_collector = std::make_unique<GarbageCollector>(3);
@@ -40,6 +42,7 @@ VulkanDevice::VulkanDevice(const Window &window, DeviceConfig config)
 VulkanDevice::~VulkanDevice() {
     DestroyImmediateObjects();
 
+    DestroyTracyContext();
     DestroyVulkanMemoryAllocator();
     DestroyVulkanDevice();
     DestroyVulkanSurface();
@@ -81,6 +84,8 @@ uint32_t VulkanDevice::QueueFamily(QueueType type) const {
 }
 
 void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(const CommandBuffer &)> &record, bool async) const {
+    ENGINE_PROFILER_FUNCTION();
+    
     if (type == QueueType::Present)
         throw std::runtime_error("Cannot record present operations in a command buffer for immediate submit!");
 
@@ -126,6 +131,8 @@ void VulkanDevice::ImmediateSubmit(QueueType type, const std::function<void(cons
 }
 
 void VulkanDevice::QueueSubmit(QueueType type, const QueueSubmitInfo &submit_info, const VulkanFence &fence) const {
+    ENGINE_PROFILER_FUNCTION_COLOR(EngineProfilerColor_Submit);
+    
     // Wait Semaphores
     std::vector<VkSemaphoreSubmitInfo> wait_semaphores;
     wait_semaphores.resize(submit_info.wait_semaphores.size());
@@ -233,7 +240,7 @@ void VulkanDevice::CreateVulkanInstance() {
     {
         uint32_t extension_count = 0;
         VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr));
-        Assert(extension_count > 0, "There should be more than one available instance extension!", __FILE__, __LINE__);
+        ENGINE_ASSERT(extension_count > 0, "There should be more than one available instance extension!");
 
         std::vector<VkExtensionProperties> supported_extensions(extension_count);
         VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, supported_extensions.data()));
@@ -259,7 +266,7 @@ void VulkanDevice::CreateVulkanInstance() {
     {
         uint32_t layer_count = 0;
         VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, nullptr));
-        Assert(layer_count > 0, "There should be more than one available instance layer!", __FILE__, __LINE__);
+        ENGINE_ASSERT(layer_count > 0, "There should be more than one available instance layer!");
 
         std::vector<VkLayerProperties> supported_layers(layer_count);
         VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, supported_layers.data()));
@@ -349,6 +356,7 @@ void VulkanDevice::CreateVulkanDevice() {
     requested_extensions.emplace_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     requested_extensions.emplace_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     requested_extensions.emplace_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    requested_extensions.emplace_back(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
 
     m_physical_device = ChoosePhysicalDevice();
 
@@ -484,6 +492,47 @@ void VulkanDevice::DestroyVulkanDevice() {
     vkDestroyDevice(m_device, nullptr);
 }
 
+void VulkanDevice::CreateTracyContext() {
+#if defined(ENGINE_ENABLE_GPU_PROFILING)
+    m_tracy_command_pool = CreateCommandPool(QueueType::Graphics, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+    m_tracy_command_buffer = m_tracy_command_pool->AllocateCommandBuffer();
+
+    if (m_has_calibrated_timestamps) {
+        m_tracy_context = TracyVkContextCalibrated(
+            m_instance,
+            m_physical_device,
+            m_device,
+            m_graphics_queue.queue,
+            m_tracy_command_buffer->Handle(),
+            vkGetInstanceProcAddr,
+            vkGetDeviceProcAddr
+        )
+    } else {
+        m_tracy_context = TracyVkContext(
+            m_instance,
+            m_physical_device,
+            m_device,
+            m_graphics_queue.queue,
+            m_tracy_command_buffer->Handle(),
+            vkGetInstanceProcAddr,
+            vkGetDeviceProcAddr
+        );
+    }
+
+    std::cout << "Created Tracy Context.\n";
+#endif
+}
+
+void VulkanDevice::DestroyTracyContext() {
+#if defined(ENGINE_ENABLE_GPU_PROFILING)
+    TracyVkDestroy(m_tracy_context)
+
+    m_tracy_command_buffer.reset();
+    m_tracy_command_pool.reset();
+    std::cout << "Destroyed Tracy Context.\n";
+#endif
+}
+
 void VulkanDevice::CreateVulkanMemoryAllocator() {
     VmaVulkanFunctions vulkan_functions = {
         .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
@@ -557,7 +606,7 @@ void VulkanDevice::DestroyImmediateObjects() {
 VkPhysicalDevice VulkanDevice::ChoosePhysicalDevice() {
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(m_instance, &device_count, nullptr);
-    Assert(device_count > 0, "There must be at least one device!", __FILE__, __LINE__);
+    ENGINE_ASSERT(device_count > 0, "There must be at least one device!");
 
     std::vector<VkPhysicalDevice> physical_devices(device_count);
     VK_CHECK(vkEnumeratePhysicalDevices(m_instance, &device_count, physical_devices.data()));
@@ -622,7 +671,7 @@ std::vector<VkDeviceQueueCreateInfo> VulkanDevice::ChooseQueues() {
 
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(m_physical_device, &queue_family_count, nullptr);
-    Assert(queue_family_count > 0, "There must be at least one queue family for this device!", __FILE__, __LINE__);
+    ENGINE_ASSERT(queue_family_count > 0, "There must be at least one queue family for this device!");
 
     std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(m_physical_device, &queue_family_count, queue_families.data());
@@ -660,12 +709,12 @@ std::vector<VkDeviceQueueCreateInfo> VulkanDevice::ChooseQueues() {
         }
     }
 
-    Assert(graphics_compute_family != invalid_family, "Must have a queue family that supports graphics and compute!");
-    Assert(present_family != invalid_family, "Must have a queue family that supports present!");
-    Assert(transfer_family != invalid_family, "Must have a dedicated transfer queue family!");
-    Assert(dedicated_compute_family != invalid_family, "Must have a dedicated compute queue family!");
+    ENGINE_ASSERT(graphics_compute_family != invalid_family, "Must have a queue family that supports graphics and compute!");
+    ENGINE_ASSERT(present_family != invalid_family, "Must have a queue family that supports present!");
+    ENGINE_ASSERT(transfer_family != invalid_family, "Must have a dedicated transfer queue family!");
+    ENGINE_ASSERT(dedicated_compute_family != invalid_family, "Must have a dedicated compute queue family!");
 
-    Assert(graphics_compute_family == present_family, "Currently we only support present queues with graphics support!");
+    ENGINE_ASSERT(graphics_compute_family == present_family, "Currently we only support present queues with graphics support!");
 
     m_graphics_queue.queue_family = graphics_compute_family;
     m_compute_queue.queue_family = graphics_compute_family;
@@ -716,13 +765,13 @@ void VulkanDevice::ChooseImageFormats() {
             VK_FORMAT_R8G8B8A8_UNORM,
         };
         m_image_formats.linear_color = pick_supported_format(linear_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        Assert(m_image_formats.linear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+        ENGINE_ASSERT(m_image_formats.linear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
 
         const std::vector<VkFormat> nonlinear_color_candidates = {
             VK_FORMAT_R8G8B8A8_SRGB,
         };
         m_image_formats.nonlinear_color = pick_supported_format(nonlinear_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        Assert(m_image_formats.nonlinear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
+        ENGINE_ASSERT(m_image_formats.nonlinear_color != VK_FORMAT_UNDEFINED, "Cannot find valid color format");
 
         //// DEPTH STENCIL ////
         const std::vector<VkFormat> depth_stencil_candidates = {
@@ -731,7 +780,7 @@ void VulkanDevice::ChooseImageFormats() {
             VK_FORMAT_D16_UNORM_S8_UINT
         };
         m_image_formats.depth_stencil = pick_supported_format(depth_stencil_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
-        Assert(m_image_formats.depth_stencil != VK_FORMAT_UNDEFINED, "Cannot find valid depth-stencil format");
+        ENGINE_ASSERT(m_image_formats.depth_stencil != VK_FORMAT_UNDEFINED, "Cannot find valid depth-stencil format");
 
         //// DEPTH ONLY ////
         const std::vector<VkFormat> depth_candidates = {
@@ -739,7 +788,7 @@ void VulkanDevice::ChooseImageFormats() {
             VK_FORMAT_D16_UNORM,
         };
         m_image_formats.depth = pick_supported_format(depth_candidates, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
-        Assert(m_image_formats.depth != VK_FORMAT_UNDEFINED, "Cannot find valid depth format");
+        ENGINE_ASSERT(m_image_formats.depth != VK_FORMAT_UNDEFINED, "Cannot find valid depth format");
 
         //// HDR COLOR ////
         const std::vector<VkFormat> hdr_color_candidates = {
@@ -748,7 +797,7 @@ void VulkanDevice::ChooseImageFormats() {
             VK_FORMAT_R8G8B8A8_SRGB // not a valid HDR format, but will do as fallback
         };
         m_image_formats.hdr = pick_supported_format(hdr_color_candidates, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
-        Assert(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid HDR format");
+        ENGINE_ASSERT(m_image_formats.hdr != VK_FORMAT_UNDEFINED, "Cannot find valid HDR format");
     }
 }
 

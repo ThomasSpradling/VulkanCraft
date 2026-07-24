@@ -10,3 +10,7 @@ target_link_libraries(engine_world PUBLIC
     glm::glm
     engine_asset_manager
 )
+
+if (ENGINE_ENABLE_TRACY_PROFILING)
+    target_link_libraries(engine_world PUBLIC TracyClient)
+endif()

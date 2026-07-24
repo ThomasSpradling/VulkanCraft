@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/errors.h"
 #include <vector>
 template <size_t Capacity>
 struct IndexFreeList {
@@ -14,7 +15,7 @@ struct IndexFreeList {
     }
 
     uint32_t Acquire() {
-        Assert(!data.empty(), "Descriptor table is full!");
+        ENGINE_ASSERT(!data.empty(), "Descriptor table is full!");
 
         uint32_t id = data.back();
         data.pop_back();
@@ -22,7 +23,7 @@ struct IndexFreeList {
     }
     
     void Release(uint32_t id) {
-        Assert(id > 0 && id < Capacity, "Invalid id");
+        ENGINE_ASSERT(id > 0 && id < Capacity, "Invalid id");
 
         data.push_back(id);
         return;

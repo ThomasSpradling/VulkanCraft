@@ -1,8 +1,9 @@
 #include "NetworkAddress.h"
+#include "Core/errors.h"
 
 NetworkAddress::NetworkAddress(const sockaddr *address, socklen_t size) {
-    Assert(address != nullptr, "Cannot create socket address!");
-    Assert(sizeof(m_address) >= static_cast<size_t>(size), "Cannot handle address of size " + std::to_string(size));
+    ENGINE_ASSERT(address != nullptr, "Cannot create socket address!");
+    ENGINE_ASSERT(sizeof(m_address) >= static_cast<size_t>(size), "Cannot handle address of size " + std::to_string(size));
     std::memcpy(&m_address, address, size);
 
     m_size = size;

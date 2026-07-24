@@ -1,4 +1,5 @@
 #include "VulkanPipeline.h"
+#include "Core/errors.h"
 #include "Platform/Graphics/Common.h"
 #include <algorithm>
 #include <cassert>
@@ -342,8 +343,8 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
 
     //// Create Shader Stages ////
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages {};
-    Assert(m_vertex_shader, "A graphic pipeline must have a vertex shader!");
-    Assert(m_fragment_shader, "A graphic pipeline must have a fragment shader!");
+    ENGINE_ASSERT(m_vertex_shader, "A graphic pipeline must have a vertex shader!");
+    ENGINE_ASSERT(m_fragment_shader, "A graphic pipeline must have a fragment shader!");
 
     std::unordered_map<std::string, std::unique_ptr<ShaderModule>> shader_modules {};
     for (const auto &[name, shader] : m_shaders) {
@@ -394,9 +395,9 @@ std::unique_ptr<VulkanPipeline> PipelineBuilder_Graphics::Build() {
     //// Control points ////
     const bool has_tessellation_stage = m_tesselation_control_shader.has_value() || m_tesselation_eval_shader.has_value();
     if (has_tessellation_stage) {
-        Assert(m_tesselation_control_shader, "Cannot have tessellation stage without a tessellation control shader!");
-        Assert(m_tesselation_eval_shader, "Cannot have tessellation stage without a tessellation evaluation shader!");
-        Assert(m_input_assembly_state.topology == VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, "Cannot have tessellation stage with a primitive topology other than PATCH_LIST!");
+        ENGINE_ASSERT(m_tesselation_control_shader, "Cannot have tessellation stage without a tessellation control shader!");
+        ENGINE_ASSERT(m_tesselation_eval_shader, "Cannot have tessellation stage without a tessellation evaluation shader!");
+        ENGINE_ASSERT(m_input_assembly_state.topology == VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, "Cannot have tessellation stage with a primitive topology other than PATCH_LIST!");
     }
 
     VkPipelineTessellationStateCreateInfo tessellation_state_create_info {
@@ -547,7 +548,7 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::SetShader(const CompiledShader
     if (entries == shader.entry_points.end())
         throw std::runtime_error("Shader module " + shader.module_name + " does not contain a compute shader!");
 
-    Assert(entries->second.size() > 0, "Cannot use compute shader without any entries!");
+    ENGINE_ASSERT(entries->second.size() > 0, "Cannot use compute shader without any entries!");
 
     const std::string entry = entry_name.empty() ? entries->second[0] : entry_name;
 
@@ -576,7 +577,7 @@ PipelineBuilder_Compute &PipelineBuilder_Compute::SetSpecializationConstants(VkS
 std::unique_ptr<VulkanPipeline> PipelineBuilder_Compute::Build() {
     std::unique_ptr<ShaderModule> shader_module = m_device.CreateShaderModule(m_shader.spirv_code);
 
-    Assert(m_compute_shader.shader_stage == ShaderStage::Compute, "Expected compute shader to have type of compute!");
+    ENGINE_ASSERT(m_compute_shader.shader_stage == ShaderStage::Compute, "Expected compute shader to have type of compute!");
     VkPipelineShaderStageCreateInfo shader_stage {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -694,8 +695,8 @@ PipelineBuilder_RayTracing &PipelineBuilder_RayTracing::SetSpecializationConstan
 }
 
 std::unique_ptr<VulkanPipeline> PipelineBuilder_RayTracing::Build() {
-    Assert(!m_shader_entries.empty(), "Cannot create raytracing pipeline without shader stages!");
-    Assert(!m_groups.empty(), "Cannot create raytracing pipeline without shader groups!");
+    ENGINE_ASSERT(!m_shader_entries.empty(), "Cannot create raytracing pipeline without shader stages!");
+    ENGINE_ASSERT(!m_groups.empty(), "Cannot create raytracing pipeline without shader groups!");
 
     //// Create Shader Modules ////
 
